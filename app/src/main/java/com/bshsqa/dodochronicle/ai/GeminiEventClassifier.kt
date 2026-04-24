@@ -62,10 +62,11 @@ class GeminiEventClassifier @Inject constructor(
         val request = Request.Builder().url(url).post(body).build()
 
         try {
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
-            val raw = response.body?.string() ?: return@withContext emptyList()
-            parseResponse(raw)
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val raw = response.body?.string() ?: return@withContext emptyList()
+                parseResponse(raw)
+            }
         } catch (e: Exception) {
             emptyList()
         }

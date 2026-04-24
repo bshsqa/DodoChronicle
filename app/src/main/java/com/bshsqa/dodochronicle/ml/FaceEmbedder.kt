@@ -81,8 +81,11 @@ class FaceEmbedder @Inject constructor(
 
     private fun loadModelFile(): MappedByteBuffer {
         val fd = context.assets.openFd(MODEL_FILE)
-        return FileInputStream(fd.fileDescriptor).channel
-            .map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+        return FileInputStream(fd.fileDescriptor).use { fis ->
+            fis.channel.use { channel ->
+                channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+            }
+        }
     }
 
     fun isAvailable() = interpreter != null

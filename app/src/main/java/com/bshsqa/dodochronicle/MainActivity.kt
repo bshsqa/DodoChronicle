@@ -9,9 +9,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -66,8 +71,17 @@ class MainActivity : ComponentActivity() {
                             permLauncher.launch(permissions.toTypedArray())
                         }
 
-                        if (permissionsGranted || true) {
+                        if (permissionsGranted) {
                             AppNavigation(startDestination = startDest)
+                        } else {
+                            Text(
+                                text = "사진 접근 권한이 필요합니다.\n설정에서 권한을 허용해주세요.",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(32.dp),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
                         }
                     }
                 }

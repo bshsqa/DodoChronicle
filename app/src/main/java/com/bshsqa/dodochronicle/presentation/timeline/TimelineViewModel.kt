@@ -111,7 +111,8 @@ class TimelineViewModel @Inject constructor(
                 _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
                 return@launch
             }
-            when (val r = importKakaoUseCase(stream)) {
+            val r = stream.use { importKakaoUseCase(it) }
+            when (r) {
                 is ImportKakaoUseCase.Result.Success ->
                     _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨") }
                 is ImportKakaoUseCase.Result.Error ->

@@ -22,12 +22,15 @@ class PhotoSyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val lastScanAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
-        val newPhotos = queryNewPhotos(lastScanAt)
-        if (newPhotos.isEmpty()) return Result.success()
-
-        syncUseCase.invoke(newPhotos).last()
-        return Result.success()
+        return try {
+            val lastScanAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
+            val newPhotos = queryNewPhotos(lastScanAt)
+            if (newPhotos.isEmpty()) return Result.success()
+            syncUseCase.invoke(newPhotos).last()
+            Result.success()
+        } catch (e: Exception) {
+            Result.failure()
+        }
     }
 
     private fun queryNewPhotos(after: Long): List<Pair<String, Long>> {

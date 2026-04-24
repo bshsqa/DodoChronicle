@@ -14,6 +14,7 @@ import com.bshsqa.dodochronicle.domain.model.Child
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
+import com.bshsqa.dodochronicle.ml.FaceCluster
 import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
 import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
@@ -71,6 +72,8 @@ class InitViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(InitUiState())
     val uiState: StateFlow<InitUiState> = _uiState.asStateFlow()
 
+    private var _rawClusters: List<FaceCluster> = emptyList()
+
     fun setChildName(name: String) = _uiState.update { it.copy(childName = name) }
     fun setBirthDate(date: LocalDate) = _uiState.update { it.copy(birthDate = date) }
     fun setReferencePhoto(uri: String) = _uiState.update { it.copy(referencePhotoUri = uri) }
@@ -107,6 +110,11 @@ class InitViewModel @Inject constructor(
         }
 
         val clusters = clusteringEngine.cluster(embeddings)
+        if (clusters.isEmpty()) {
+            _uiState.update { it.copy(step = InitStep.ChildInfo, error = "아이 얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요") }
+            return
+        }
+        _rawClusters = clusters
         val clusterUi = clusters.map { c ->
             ClusterUiModel(c.id, c.representativeUris, c.embeddings.size)
         }
@@ -128,11 +136,15 @@ class InitViewModel @Inject constructor(
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
+            val embeddings = _rawClusters
+                .filter { it.id in state.selectedClusterIds }
+                .map { it.averageEmbedding }
             val child = Child(
                 id = UUID.randomUUID().toString(),
                 name = state.childName,
                 birthDate = state.birthDate!!,
-                referencePhotoUri = state.referencePhotoUri
+                referencePhotoUri = state.referencePhotoUri,
+                faceEmbeddings = embeddings
             )
             childRepository.save(child)
             dataStore.edit { prefs -> prefs[KEY_INITIALIZED] = true }
