@@ -3,13 +3,9 @@ package com.bshsqa.dodochronicle.presentation.timeline
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -21,9 +17,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -31,13 +27,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
-import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import java.util.UUID
-import kotlin.math.abs
 
 private enum class ZoomLevel { YEAR, MONTH, WEEK, DAY }
 
@@ -66,10 +59,7 @@ fun TimelineScreen(
     val kakaoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        uri?.let { u ->
-            // ViewModel에서 contentResolver로 stream 열기
-            showKakaoMenu = false
-        }
+        uri?.let { viewModel.importKakao(it) }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -206,14 +196,16 @@ private fun TimelineContent(
     modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
-    val zoomLevel by remember { derivedStateOf { scaleToZoom(scale) } }
-
+    val density = LocalDensity.current
     val today = LocalDate.now()
     val startDate = birthDate ?: (today.minusYears(3))
     val totalDays = ChronoUnit.DAYS.between(startDate, today).toFloat().coerceAtLeast(1f)
 
-    val density = LocalDensity.current
+    // 초기 offsetY: 오늘(타임라인 맨 아래)이 화면 하단에 오도록 설정
+    val baseHeightInitial = with(density) { 2000.dp.toPx() }
+    var offsetY by remember { mutableFloatStateOf(-(baseHeightInitial - with(density) { 400.dp.toPx() })) }
+    val zoomLevel by remember { derivedStateOf { scaleToZoom(scale) } }
+
     val timelineBarWidth = 56.dp
 
     Box(modifier = modifier
@@ -236,7 +228,7 @@ private fun TimelineContent(
             }
         }
     ) {
-        val baseHeightPx = with(density) { 2000.dp.toPx() * scale }
+        val baseHeightPx = baseHeightInitial * scale
         val clampedOffset = offsetY.coerceIn(-baseHeightPx + with(density) { 200.dp.toPx() }, 0f)
 
         Row(modifier = Modifier.fillMaxSize()) {

@@ -16,7 +16,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.io.InputStream
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
@@ -104,9 +103,14 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    fun importKakao(stream: InputStream) {
+    fun importKakao(uri: Uri) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
+            val stream = context.contentResolver.openInputStream(uri)
+            if (stream == null) {
+                _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
+                return@launch
+            }
             when (val r = importKakaoUseCase(stream)) {
                 is ImportKakaoUseCase.Result.Success ->
                     _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨") }

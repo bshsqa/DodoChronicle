@@ -11,8 +11,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Child
-import com.bshsqa.dodochronicle.domain.model.EventCategory
-import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase

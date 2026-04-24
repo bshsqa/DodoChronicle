@@ -2,12 +2,9 @@ package com.bshsqa.dodochronicle.ml
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.graphics.RectF
 import com.google.mlkit.vision.face.Face
 import dagger.hilt.android.qualifiers.ApplicationContext
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.vision.classifier.ImageClassifier
+import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -23,24 +20,25 @@ private const val EMBEDDING_SIZE = 128
 fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
     var dot = 0f; var normA = 0f; var normB = 0f
     for (i in a.indices) { dot += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i] }
-    return if (normA == 0f || normB == 0f) 0f else dot / (Math.sqrt(normA.toDouble()) * Math.sqrt(normB.toDouble())).toFloat()
+    val denom = Math.sqrt(normA.toDouble()) * Math.sqrt(normB.toDouble())
+    return if (denom == 0.0) 0f else (dot / denom).toFloat()
 }
 
 @Singleton
 class FaceEmbedder @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private var interpreter: org.tensorflow.lite.Interpreter? = null
+    private var interpreter: Interpreter? = null
 
     init {
         try {
-            val model = loadModelFile()
-            interpreter = org.tensorflow.lite.Interpreter(model)
+            interpreter = Interpreter(loadModelFile())
         } catch (e: Exception) {
-            // Model file not present — embedding will return null
+            // mobile_face_net.tflite not present — embed() returns null
         }
     }
 
+    @Synchronized
     fun embed(bitmap: Bitmap, face: Face): FloatArray? {
         val interp = interpreter ?: return null
         val crop = cropFace(bitmap, face) ?: return null
@@ -51,11 +49,11 @@ class FaceEmbedder @Inject constructor(
     }
 
     private fun cropFace(bitmap: Bitmap, face: Face): Bitmap? {
-        val bounds = face.boundingBox
-        val left = bounds.left.coerceAtLeast(0)
-        val top = bounds.top.coerceAtLeast(0)
-        val right = bounds.right.coerceAtMost(bitmap.width)
-        val bottom = bounds.bottom.coerceAtMost(bitmap.height)
+        val b = face.boundingBox
+        val left = b.left.coerceAtLeast(0)
+        val top = b.top.coerceAtLeast(0)
+        val right = b.right.coerceAtMost(bitmap.width)
+        val bottom = b.bottom.coerceAtMost(bitmap.height)
         if (right <= left || bottom <= top) return null
         return Bitmap.createScaledBitmap(
             Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top),
@@ -64,7 +62,7 @@ class FaceEmbedder @Inject constructor(
     }
 
     private fun preprocessBitmap(bitmap: Bitmap): ByteBuffer {
-        val buf = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4)
+        val buf = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4)
         buf.order(ByteOrder.nativeOrder())
         val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
         bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
