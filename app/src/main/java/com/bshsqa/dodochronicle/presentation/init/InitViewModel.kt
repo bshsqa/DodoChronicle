@@ -3,6 +3,10 @@ package com.bshsqa.dodochronicle.presentation.init
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
@@ -29,6 +33,8 @@ import java.io.InputStream
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
+
+private val KEY_INITIALIZED = booleanPreferencesKey("initialized")
 
 data class ClusterUiModel(val id: Int, val previewUris: List<String>, val count: Int)
 
@@ -60,7 +66,8 @@ class InitViewModel @Inject constructor(
     private val faceDetector: FaceDetectorHelper,
     private val faceEmbedder: FaceEmbedder,
     private val clusteringEngine: FaceClusteringEngine,
-    private val importKakaoUseCase: ImportKakaoUseCase
+    private val importKakaoUseCase: ImportKakaoUseCase,
+    private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(InitUiState())
@@ -130,6 +137,7 @@ class InitViewModel @Inject constructor(
                 referencePhotoUri = state.referencePhotoUri
             )
             childRepository.save(child)
+            dataStore.edit { prefs -> prefs[KEY_INITIALIZED] = true }
             _uiState.update { it.copy(step = InitStep.Done) }
         }
     }
