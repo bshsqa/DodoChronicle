@@ -1,0 +1,4 @@
+# Place mobile_face_net.tflite here.
+# Download from: https://github.com/shaqian/tflite-models (MobileFaceNet)
+# Input: 112x112 RGB float32, normalized to [-1,1]
+# Output: 128-dim float32 embedding

@@ -1,0 +1,4 @@
+-keep class com.bshsqa.dodochronicle.** { *; }
+-keep class org.tensorflow.** { *; }
+-keep class com.google.mlkit.** { *; }
+-dontwarn org.tensorflow.**
