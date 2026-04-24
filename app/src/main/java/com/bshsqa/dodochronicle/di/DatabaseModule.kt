@@ -1,0 +1,29 @@
+package com.bshsqa.dodochronicle.di
+
+import android.content.Context
+import androidx.room.Room
+import com.bshsqa.dodochronicle.data.local.db.DodoDatabase
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+object DatabaseModule {
+
+    @Provides
+    @Singleton
+    fun provideDatabase(@ApplicationContext context: Context): DodoDatabase =
+        Room.databaseBuilder(context, DodoDatabase::class.java, "dodo.db")
+            .fallbackToDestructiveMigration()
+            .build()
+
+    @Provides fun provideChildDao(db: DodoDatabase) = db.childDao()
+    @Provides fun provideEventDao(db: DodoDatabase) = db.eventDao()
+    @Provides fun providePhotoRecordDao(db: DodoDatabase) = db.photoRecordDao()
+    @Provides fun provideKakaoRoomDao(db: DodoDatabase) = db.kakaoRoomDao()
+    @Provides fun provideKakaoMessageDao(db: DodoDatabase) = db.kakaoMessageDao()
+}
