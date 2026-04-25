@@ -46,10 +46,12 @@
 ┌───────────────────────────────────────────────────────┐
 │                    Presentation Layer                 │
 │  TimelineScreen │ InitScreen │ EventDetailScreen      │
+│  SettingsScreen                                       │
 │  (Jetpack Compose)                                    │
 ├───────────────────────────────────────────────────────┤
 │                    ViewModel Layer                    │
 │  TimelineViewModel │ InitViewModel                    │
+│  EventDetailViewModel │ SettingsViewModel             │
 │  (StateFlow + Hilt)                                   │
 ├──────────────┬──────────────┬────────────────────────┤
 │  Use Cases                                            │
@@ -215,7 +217,7 @@
 
 ### 3.7 설정 화면
 
-> **구현 상태:** Phase 4 예정 — 현재 미구현
+> **구현 상태:** Phase 4 완료 ✅ (2026-04-25, `claude/settings-permission-ui`)
 
 타임라인 상단 메뉴(⋮)에서 접근한다.
 
@@ -363,20 +365,19 @@ KakaoMessage
 - [x] 즐겨찾기 + 카테고리 필터
 - [x] 수동 이벤트 추가 (FAB)
 - [x] 잘못된 사진/이벤트 제거
-- [ ] 설정 화면 (초기화 재실행, 데이터 초기화) ← **미구현**
 
 ### Phase 4 — 완성도 (진행 중)
 - [x] 이벤트 상세 화면
 - [x] 카카오톡 증분 업데이트 (재import 시 중복 제거)
-- [ ] 설정 화면 구현 (SET-01 ~ SET-03)
-- [ ] 권한 거부 처리 UI (PERM-03)
+- [x] 설정 화면 구현 (SET-01 ~ SET-03)
+- [x] 권한 거부 처리 UI (PERM-03)
 - [ ] ContentObserver 기반 갤러리 실시간 감지
 - [ ] 온보딩 UX 개선 (권한 요청 흐름 포함)
 - [ ] 성능 최적화 (사진 스캔 속도, 타임라인 60fps)
 
 ---
 
-*문서 버전: 1.3 | 최초 작성: 2026-04-24 | 최종 수정: 2026-04-25*
+*문서 버전: 1.4 | 최초 작성: 2026-04-24 | 최종 수정: 2026-04-26*
 
 ### 변경 이력
 
@@ -386,3 +387,4 @@ KakaoMessage
 | 1.1 | 2026-04-24 | SYNC-04 이중 임계값 도입(SYNC-04b 추가), UI-03b 스크롤 추가, NFR-01 초기화 오버레이·제스처 블락 명세, NFR-08 Material Design 3 명시, AI API 키 관리 정책 추가 |
 | 1.2 | 2026-04-25 | INIT-04 수정(클러스터 전체 노출, 참조 사진 기반 사전 선택 금지), INIT-08 추가(스캔 취소 버튼), INIT-09 추가(성별 필드), KAKO-07 추가(LLM 애칭·호칭 맥락 인식), NFR-01 수정(취소 버튼 허용), 데이터 모델 Child에 gender·referencePhotoUri 명시 |
 | 1.3 | 2026-04-25 | 문서-코드 충돌 8건 해소: 아키텍처 다이어그램 실제 코드 기준으로 재작성, SYNC-06 ContentObserver Phase 4로 이동, UI-06 상세화면 이동으로 수정, NFR-05 롤백 표현 실제 동작 기준으로 수정, MotionLayout 제거, AI 스택 Gemini API로 단일화, Phase 계획 실구현 현황 반영, §3.7 설정 화면·§3.8 권한 요구사항 신규 추가, NFR-09 권한 추가, Coil 기술 스택 추가 |
+| 1.4 | 2026-04-26 | 구현 완료 반영: §2 아키텍처 다이어그램에 SettingsScreen·SettingsViewModel·EventDetailViewModel 추가, §3.7 구현 상태 "완료"로 변경, Phase 3 설정화면 체크박스 제거, Phase 4 SET-01~03·PERM-03 완료 표시 |
