@@ -45,26 +45,26 @@
 ```
 ┌───────────────────────────────────────────────────────┐
 │                    Presentation Layer                 │
-│  TimelineScreen │ InitWizardScreen │ EventDetailScreen│
-│  (Jetpack Compose + MotionLayout)                     │
+│  TimelineScreen │ InitScreen │ EventDetailScreen      │
+│  (Jetpack Compose)                                    │
 ├───────────────────────────────────────────────────────┤
 │                    ViewModel Layer                    │
-│  TimelineViewModel │ InitViewModel │ PhotoScanViewModel│
+│  TimelineViewModel │ InitViewModel                    │
 │  (StateFlow + Hilt)                                   │
-├──────────────┬──────────────┬───────────────────────── ┤
-│  Use Cases   │              │                          │
-│  ImportKakao │  ScanPhotos  │  ClassifyEvent           │
-│  SyncNewPhoto│  ManageEvent │  FaceMatch               │
-├──────────────┴──────────────┴──────────────────────────┤
+├──────────────┬──────────────┬────────────────────────┤
+│  Use Cases                                            │
+│  ImportKakaoUseCase │ SyncNewPhotosUseCase            │
+│  ManageEventUseCase                                   │
+├───────────────────────────────────────────────────────┤
 │                    Data Layer                          │
 │  Room DB  │  MediaStore  │  FileSystem (KakaoTalk .txt)│
 ├───────────────────────────────────────────────────────┤
 │                    ML / AI Layer                       │
-│  ML Kit Face Detection │ TFLite FaceNet (임베딩)       │
-│  Claude / Gemini API (이벤트 분류, 온라인)              │
+│  ML Kit Face Detection │ TFLite MobileFaceNet (임베딩) │
+│  FaceClusteringEngine  │ Gemini API (이벤트 분류)      │
 ├───────────────────────────────────────────────────────┤
 │                    Background Layer                    │
-│  WorkManager (신규 사진 스캔) │ ContentObserver (갤러리)│
+│  WorkManager (신규 사진 6시간 주기 스캔)               │
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -138,7 +138,7 @@
 | SYNC-04 | 유사도가 상단 임계값 미만이고 하단 임계값(예: 0.4) 이상인 경우(애매한 사진)에만 사용자에게 확인 요청 알림을 표시한다 |
 | SYNC-04b | 유사도가 하단 임계값(예: 0.4) 미만이면 아이와 무관한 사진으로 판단하여 사용자에게 확인 없이 자동으로 제외한다 |
 | SYNC-05 | 사용자가 확인 요청에서 수락/거부를 선택하면 결과를 DB에 반영한다 |
-| SYNC-06 | WorkManager로 스캔을 스케줄링하며, ContentObserver로 갤러리 변경을 감지한다 |
+| SYNC-06 | WorkManager로 6시간 주기 스캔을 스케줄링한다. ContentObserver 기반 실시간 감지는 Phase 4 구현 예정이다 |
 
 ---
 
@@ -196,7 +196,7 @@
 | UI-03b | 스크롤(드래그)로 타임라인을 시간 축 방향으로 이동할 수 있다 |
 | UI-04 | 이벤트가 있는 날짜에는 왼쪽에 말풍선 형태의 이벤트 카드를 표시한다 |
 | UI-05 | 이벤트 카드는 카테고리 태그(한 말 / 한 일 / 사진)를 시각적으로 구분하여 표시한다 |
-| UI-06 | 이벤트 카드를 탭하면 확장 애니메이션과 함께 내부 상세 아이템이 표시된다 |
+| UI-06 | 이벤트 카드를 탭하면 이벤트 상세 화면으로 이동한다 |
 | UI-07 | 즐겨찾기 필터 토글로 즐겨찾기 이벤트만 표시할 수 있다 |
 | UI-08 | 카테고리 필터 칩으로 특정 카테고리만 표시할 수 있다 |
 
@@ -213,6 +213,31 @@
 
 ---
 
+### 3.7 설정 화면
+
+> **구현 상태:** Phase 4 예정 — 현재 미구현
+
+타임라인 상단 메뉴(⋮)에서 접근한다.
+
+| ID | 요구사항 |
+|---|---|
+| SET-01 | "초기화 재실행" 항목을 제공한다. 실행 전 확인 다이얼로그를 표시하며, 확인 시 현재 아이 정보와 모든 이벤트·사진기록·카카오 메시지를 삭제하고 초기화 마법사로 복귀한다 |
+| SET-02 | "데이터 전체 초기화" 항목을 제공한다. 실행 전 경고 다이얼로그(되돌릴 수 없음)를 표시하며, 확인 시 앱의 모든 저장 데이터를 삭제하고 최초 실행 상태로 복귀한다 |
+| SET-03 | 설정 변경 후 되돌아갈 때 타임라인 화면이 즉시 갱신된다 |
+
+---
+
+### 3.8 권한 요구사항
+
+| ID | 권한 | 용도 | 비고 |
+|---|---|---|---|
+| PERM-01 | `READ_MEDIA_IMAGES` | 기기 사진 접근 | Android 13 (API 33) 이상 |
+| PERM-01b | `READ_EXTERNAL_STORAGE` | 기기 사진 접근 | Android 12 (API 32) 이하 |
+| PERM-02 | `INTERNET` | Gemini API 호출 | AI 분류 기능에만 필요; 미허용 시 AI 분류 비활성화, 나머지 기능은 정상 동작 |
+| PERM-03 | 사진 권한 거부 시 | 초기화 스캔 및 사진 동기화 비활성화, 사용자에게 권한 필요 안내 메시지 표시 | |
+
+---
+
 ## 4. 비기능 요구사항
 
 | ID | 구분 | 요구사항 |
@@ -221,10 +246,11 @@
 | NFR-02 | 성능 | 타임라인 스크롤은 60fps 이상을 유지한다 |
 | NFR-03 | 프라이버시 | 얼굴 인식은 온디바이스에서만 수행하며 외부 서버에 사진/임베딩을 전송하지 않는다 |
 | NFR-04 | 프라이버시 | 카카오톡 파싱 데이터는 기기 내 Room DB에만 저장한다 |
-| NFR-05 | 신뢰성 | 카카오톡 import 실패 시 이전 데이터는 유지되며 롤백된다 |
+| NFR-05 | 신뢰성 | 카카오톡 import 시 AI 이벤트 추출을 DB 쓰기 전에 먼저 완료한다. AI 처리 실패 시 DB에 아무것도 기록되지 않아 재import로 재처리가 가능하다 |
 | NFR-06 | 호환성 | Android 10 (API 29) 이상을 지원한다 |
 | NFR-07 | 저장소 | TFLite 모델 파일은 앱 번들에 포함하며 앱 크기는 100MB 이하를 목표로 한다 |
 | NFR-08 | 디자인 | 모든 UI 컴포넌트, 모션, 색상 체계는 Material Design 3(M3) 가이드라인을 따른다 |
+| NFR-09 | 권한 | 사진 접근 권한(READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE) 거부 시 사진 관련 기능을 비활성화하고 권한 안내 메시지를 표시한다. INTERNET 권한은 AI 기능에만 필요하며 미허용 시 AI 분류 기능만 비활성화된다 |
 
 ---
 
@@ -278,15 +304,16 @@ KakaoMessage
 | 영역 | 기술 | 비고 |
 |---|---|---|
 | 언어 | Kotlin | |
-| UI | Jetpack Compose + MotionLayout | 타임라인 애니메이션 |
+| UI | Jetpack Compose | |
 | 아키텍처 | Clean Architecture + MVVM | |
 | DI | Hilt | |
 | DB | Room + SQLite | 온디바이스 저장 |
 | 비동기 | Kotlin Coroutines + Flow | |
-| 백그라운드 작업 | WorkManager + ContentObserver | 신규 사진 스캔 |
+| 백그라운드 작업 | WorkManager | 신규 사진 6시간 주기 스캔 |
 | 얼굴 탐지 | ML Kit Face Detection | 무료, 온디바이스 |
-| 얼굴 임베딩 | TFLite FaceNet | 무료, 온디바이스 |
-| 이벤트 분류 AI | Claude API 또는 Gemini API | 카카오톡 텍스트 분석; API 키 관리 정책은 §7 참고 |
+| 얼굴 임베딩 | TFLite MobileFaceNet | 무료, 온디바이스; `assets/mobile_face_net.tflite` 별도 배치 필요 |
+| 이미지 로딩 | Coil | AsyncImage 컴포저블 |
+| 이벤트 분류 AI | Gemini API | 카카오톡 텍스트 분석; API 키 관리 정책은 §7 참고 |
 | 사진 접근 | Android MediaStore API | |
 | 빌드 | Gradle (Kotlin DSL) | |
 
@@ -318,35 +345,38 @@ KakaoMessage
 
 ## 8. 구현 우선순위 (Phase 계획)
 
-### Phase 1 — 핵심 기반 (MVP)
-- [ ] 프로젝트 구조 설정 (Clean Architecture, Hilt, Room)
-- [ ] 초기화 마법사: 사진 스캔 + 얼굴 클러스터링 + 그룹 선택 UI
-- [ ] 기본 타임라인 UI (수직 바 + 날짜 스케일)
-- [ ] 카카오톡 `.txt` 파일 파싱 + import
+### Phase 1 — 핵심 기반 (MVP) ✅ 완료
+- [x] 프로젝트 구조 설정 (Clean Architecture, Hilt, Room)
+- [x] 초기화 마법사: 사진 스캔 + 얼굴 클러스터링 + 그룹 선택 UI
+- [x] 기본 타임라인 UI (수직 바 + 날짜 스케일)
+- [x] 카카오톡 `.txt` 파일 파싱 + import
 
-### Phase 2 — 자동화
-- [ ] 핀치줌 타임라인 (줌 레벨별 날짜 단위 전환)
-- [ ] 이벤트 카드 UI (말풍선 + 카테고리 태그)
-- [ ] 이벤트 카드 확장 애니메이션
-- [ ] WorkManager 기반 신규 사진 자동 스캔
-- [ ] 불확실 사진 사용자 확인 플로우
+### Phase 2 — 자동화 ✅ 완료
+- [x] 핀치줌 타임라인 (줌 레벨별 날짜 단위 전환)
+- [x] 이벤트 카드 UI (말풍선 + 카테고리 태그)
+- [x] 이벤트 카드 탭 → 상세 화면 이동
+- [x] WorkManager 기반 신규 사진 자동 스캔 (6시간 주기)
+- [x] 불확실 사진 사용자 확인 플로우 (유사도 0.4~0.75 구간)
 
-### Phase 3 — AI 및 사용성
-- [ ] Claude/Gemini API 연동으로 이벤트 자동 분류
-- [ ] 즐겨찾기 + 카테고리 필터
-- [ ] 수동 이벤트 추가 (FAB)
-- [ ] 잘못된 사진/이벤트 제거
-- [ ] 설정 화면 (초기화 재실행, 데이터 초기화)
+### Phase 3 — AI 및 사용성 ✅ 대부분 완료
+- [x] Gemini API 연동으로 이벤트 자동 분류
+- [x] 즐겨찾기 + 카테고리 필터
+- [x] 수동 이벤트 추가 (FAB)
+- [x] 잘못된 사진/이벤트 제거
+- [ ] 설정 화면 (초기화 재실행, 데이터 초기화) ← **미구현**
 
-### Phase 4 — 완성도
-- [ ] 이벤트 상세 화면
-- [ ] 카카오톡 증분 업데이트 (재import 시 중복 제거)
-- [ ] 온보딩 UX 개선
+### Phase 4 — 완성도 (진행 중)
+- [x] 이벤트 상세 화면
+- [x] 카카오톡 증분 업데이트 (재import 시 중복 제거)
+- [ ] 설정 화면 구현 (SET-01 ~ SET-03)
+- [ ] 권한 거부 처리 UI (PERM-03)
+- [ ] ContentObserver 기반 갤러리 실시간 감지
+- [ ] 온보딩 UX 개선 (권한 요청 흐름 포함)
 - [ ] 성능 최적화 (사진 스캔 속도, 타임라인 60fps)
 
 ---
 
-*문서 버전: 1.2 | 최초 작성: 2026-04-24 | 최종 수정: 2026-04-25*
+*문서 버전: 1.3 | 최초 작성: 2026-04-24 | 최종 수정: 2026-04-25*
 
 ### 변경 이력
 
@@ -355,3 +385,4 @@ KakaoMessage
 | 1.0 | 2026-04-24 | 최초 작성 |
 | 1.1 | 2026-04-24 | SYNC-04 이중 임계값 도입(SYNC-04b 추가), UI-03b 스크롤 추가, NFR-01 초기화 오버레이·제스처 블락 명세, NFR-08 Material Design 3 명시, AI API 키 관리 정책 추가 |
 | 1.2 | 2026-04-25 | INIT-04 수정(클러스터 전체 노출, 참조 사진 기반 사전 선택 금지), INIT-08 추가(스캔 취소 버튼), INIT-09 추가(성별 필드), KAKO-07 추가(LLM 애칭·호칭 맥락 인식), NFR-01 수정(취소 버튼 허용), 데이터 모델 Child에 gender·referencePhotoUri 명시 |
+| 1.3 | 2026-04-25 | 문서-코드 충돌 8건 해소: 아키텍처 다이어그램 실제 코드 기준으로 재작성, SYNC-06 ContentObserver Phase 4로 이동, UI-06 상세화면 이동으로 수정, NFR-05 롤백 표현 실제 동작 기준으로 수정, MotionLayout 제거, AI 스택 Gemini API로 단일화, Phase 계획 실구현 현황 반영, §3.7 설정 화면·§3.8 권한 요구사항 신규 추가, NFR-09 권한 추가, Coil 기술 스택 추가 |

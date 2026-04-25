@@ -4,6 +4,22 @@
 
 ---
 
+> **⚠️ 역사적 참고 문서**
+>
+> 이 문서는 2026-04-25에 기능 계획 시점에 작성된 것이다.
+> 문서 작성 이후 시나리오 검증(SCENARIO_VERIFICATION.md) 과정에서 아래 3개의 버그가 추가 발견·수정되었으며,
+> 이 문서에는 해당 내용이 포함되어 있지 않다.
+>
+> | 버그 ID | 내용 | 수정 파일 |
+> |---|---|---|
+> | B-01 | TFLite 모델 파일 누락 시 무음 실패 → `isAvailable()` 체크 추가 | `InitViewModel.kt` |
+> | B-02 | 아이 정보 없을 때 타임라인 빈 화면 → `needsInit` 플래그 + 초기화 화면 이동 | `TimelineViewModel.kt`, `TimelineScreen.kt`, `AppNavigation.kt` |
+> | B-03 | 카카오 import 비원자적 처리 → AI 추출 선행 후 DB 쓰기로 순서 변경 | `ImportKakaoUseCase.kt` |
+>
+> 전체 변경 이력은 REQUIREMENTS.md(v1.3) 및 SCENARIO_VERIFICATION.md를 참조한다.
+
+---
+
 ## 개요
 
 세 가지 기능 개선 + 한 가지 AI 프롬프트 개선을 다룬다.
