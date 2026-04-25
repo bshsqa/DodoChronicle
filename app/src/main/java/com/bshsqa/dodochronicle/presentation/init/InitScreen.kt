@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.bshsqa.dodochronicle.domain.model.Gender
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -43,19 +44,10 @@ fun InitScreen(viewModel: InitViewModel, onInitComplete: () -> Unit) {
         ) { step ->
             when (step) {
                 is InitStep.ChildInfo -> ChildInfoStep(state, viewModel)
-                is InitStep.Scanning -> ScanningStep(state)
+                is InitStep.Scanning -> ScanningStep(state, viewModel)
                 is InitStep.ClusterSelect -> ClusterSelectStep(state, viewModel)
                 is InitStep.Done -> Box(Modifier.fillMaxSize())
             }
-        }
-
-        // 스캔 중 전체화면 블락 오버레이
-        if (state.step is InitStep.Scanning) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) { /* consume all gestures */ }
-            )
         }
     }
 
@@ -160,13 +152,47 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
             shape = RoundedCornerShape(12.dp)
         )
 
+        // 성별 선택
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "성별",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            @OptIn(ExperimentalMaterial3Api::class)
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = state.gender == Gender.MALE,
+                    onClick = { vm.setGender(Gender.MALE) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    icon = {}
+                ) {
+                    Text("남아")
+                }
+                SegmentedButton(
+                    selected = state.gender == Gender.FEMALE,
+                    onClick = { vm.setGender(Gender.FEMALE) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    icon = {}
+                ) {
+                    Text("여아")
+                }
+            }
+        }
+
         Spacer(Modifier.weight(1f))
 
         Button(
             onClick = vm::startScanning,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
             shape = RoundedCornerShape(12.dp),
-            enabled = state.childName.isNotBlank() && state.birthDate != null && state.referencePhotoUri.isNotBlank()
+            enabled = state.childName.isNotBlank()
+                    && state.birthDate != null
+                    && state.referencePhotoUri.isNotBlank()
+                    && state.gender != null
         ) {
             Icon(Icons.Default.Search, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -194,42 +220,56 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
 }
 
 @Composable
-private fun ScanningStep(state: InitUiState) {
+private fun ScanningStep(state: InitUiState, vm: InitViewModel) {
     val progress = if (state.totalCount > 0) state.scannedCount.toFloat() / state.totalCount else 0f
     val percent = (progress * 100).toInt()
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) { /* 스캔 중 배경 제스처 차단 */ }
     ) {
-        Icon(
-            imageVector = Icons.Default.FaceRetouchingNatural,
-            contentDescription = null,
-            modifier = Modifier.size(72.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.height(32.dp))
-        Text("사진 분석 중...", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "${state.scannedCount} / ${state.totalCount} 장 완료 ($percent%)",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(24.dp))
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth(),
-            strokeCap = StrokeCap.Round
-        )
-        Spacer(Modifier.height(24.dp))
-        Text(
-            "얼굴 인식 중입니다. 잠시 기다려주세요.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.FaceRetouchingNatural,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(32.dp))
+            Text("사진 분석 중...", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "${state.scannedCount} / ${state.totalCount} 장 완료 ($percent%)",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(24.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                strokeCap = StrokeCap.Round
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "얼굴 인식 중입니다. 잠시 기다려주세요.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(32.dp))
+            OutlinedButton(onClick = vm::cancelScanning) {
+                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("취소")
+            }
+        }
     }
 }
 

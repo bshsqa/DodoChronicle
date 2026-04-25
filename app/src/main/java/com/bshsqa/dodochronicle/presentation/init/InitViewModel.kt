@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Child
+import com.bshsqa.dodochronicle.domain.model.Gender
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.ml.FaceCluster
 import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
@@ -20,6 +21,9 @@ import com.bshsqa.dodochronicle.ml.PhotoEmbedding
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +49,7 @@ data class InitUiState(
     val step: InitStep = InitStep.ChildInfo,
     val childName: String = "",
     val birthDate: LocalDate? = null,
+    val gender: Gender? = null,
     val referencePhotoUri: String = "",
     val scannedCount: Int = 0,
     val totalCount: Int = 0,
@@ -67,19 +72,39 @@ class InitViewModel @Inject constructor(
     val uiState: StateFlow<InitUiState> = _uiState.asStateFlow()
 
     private var _rawClusters: List<FaceCluster> = emptyList()
+    private var scanJob: Job? = null
 
     fun setChildName(name: String) = _uiState.update { it.copy(childName = name) }
     fun setBirthDate(date: LocalDate) = _uiState.update { it.copy(birthDate = date) }
+    fun setGender(gender: Gender) = _uiState.update { it.copy(gender = gender) }
     fun setReferencePhoto(uri: String) = _uiState.update { it.copy(referencePhotoUri = uri) }
 
     fun startScanning() {
         val state = _uiState.value
-        if (state.childName.isBlank() || state.birthDate == null || state.referencePhotoUri.isBlank()) {
-            _uiState.update { it.copy(error = "이름, 생년월일, 사진을 모두 입력해주세요") }
+        if (state.childName.isBlank() || state.birthDate == null
+            || state.referencePhotoUri.isBlank() || state.gender == null
+        ) {
+            _uiState.update { it.copy(error = "사진, 이름, 생년월일, 성별을 모두 입력해주세요") }
             return
         }
         _uiState.update { it.copy(step = InitStep.Scanning, error = null) }
-        viewModelScope.launch(Dispatchers.IO) { performScan() }
+        scanJob = viewModelScope.launch(Dispatchers.IO) { performScan() }
+    }
+
+    fun cancelScanning() {
+        scanJob?.cancel()
+        scanJob = null
+        _rawClusters = emptyList()
+        _uiState.update { state ->
+            state.copy(
+                step = InitStep.ChildInfo,
+                scannedCount = 0,
+                totalCount = 0,
+                clusters = emptyList(),
+                selectedClusterIds = emptySet(),
+                error = null
+            )
+        }
     }
 
     private suspend fun performScan() {
@@ -91,6 +116,7 @@ class InitViewModel @Inject constructor(
         var processed = 0
 
         for ((uri, takenAt) in photoUris) {
+            currentCoroutineContext().ensureActive()
             val bmp = loadBitmap(uri)
             if (bmp != null) {
                 val faces = faceDetector.detectFaces(bmp)
@@ -137,6 +163,7 @@ class InitViewModel @Inject constructor(
                 id = UUID.randomUUID().toString(),
                 name = state.childName,
                 birthDate = state.birthDate!!,
+                gender = state.gender!!,
                 referencePhotoUri = state.referencePhotoUri,
                 faceEmbeddings = embeddings
             )

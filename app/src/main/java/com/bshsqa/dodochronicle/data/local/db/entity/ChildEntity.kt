@@ -8,6 +8,7 @@ data class ChildEntity(
     @PrimaryKey val id: String,
     val name: String,
     val birthDate: Long,
+    val gender: String,
     val referencePhotoUri: String,
     val faceEmbeddingsJson: String = "[]",
     val createdAt: Long = System.currentTimeMillis()
