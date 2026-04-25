@@ -99,6 +99,7 @@ dependencies {
     implementation(libs.mlkit.face.detection)
 
     // TFLite
+    implementation(libs.tflite.core)
     implementation(libs.tflite.support)
     implementation(libs.tflite.task.vision)
 

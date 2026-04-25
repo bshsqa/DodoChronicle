@@ -3,11 +3,13 @@ package com.bshsqa.dodochronicle.domain.usecase
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.kakao.KakaoParser
 import java.io.InputStream
+import java.util.UUID
 import javax.inject.Inject
 
 class ImportKakaoUseCase @Inject constructor(
@@ -30,8 +32,8 @@ class ImportKakaoUseCase @Inject constructor(
 
             var room = kakaoRepository.getRoomByName(parsed.roomName)
             if (room == null) {
-                room = com.bshsqa.dodochronicle.domain.model.KakaoRoom(
-                    id = java.util.UUID.randomUUID().toString(),
+                room = KakaoRoom(
+                    id = UUID.randomUUID().toString(),
                     roomName = parsed.roomName
                 )
                 kakaoRepository.upsertRoom(room)
@@ -58,7 +60,7 @@ class ImportKakaoUseCase @Inject constructor(
 
             val events = extractedEvents.map { extracted ->
                 Event(
-                    id = java.util.UUID.randomUUID().toString(),
+                    id = UUID.randomUUID().toString(),
                     childId = child.id,
                     date = extracted.date,
                     category = extracted.category,
