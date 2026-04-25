@@ -30,7 +30,8 @@ data class TimelineUiState(
     val onlyFavorite: Boolean = false,
     val pendingPhotos: List<SyncNewPhotosUseCase.PendingPhoto> = emptyList(),
     val snackbar: String? = null,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val needsInit: Boolean = false
 )
 
 @HiltViewModel
@@ -52,7 +53,11 @@ class TimelineViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val child = childRepository.getFirst() ?: return@launch
+            val child = childRepository.getFirst()
+            if (child == null) {
+                _state.update { it.copy(needsInit = true) }
+                return@launch
+            }
             childId = child.id
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
 

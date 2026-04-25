@@ -47,11 +47,7 @@ class ImportKakaoUseCase @Inject constructor(
 
             if (newMessages.isEmpty()) return Result.Success(0, 0)
 
-            kakaoRepository.insertMessages(newMessages)
-
-            val latestAt = newMessages.maxOf { it.sentAt }
-            kakaoRepository.updateLastImported(room.id, latestAt)
-
+            // AI 추출을 DB 쓰기 전에 실행 — 실패 시 DB에 아무것도 쓰이지 않아 재시도 가능
             val textMessages = newMessages.filter { it.content != "사진" && it.content != "동영상" }
             val extractedEvents = geminiClassifier.extractEvents(
                 messages = textMessages,
@@ -68,6 +64,11 @@ class ImportKakaoUseCase @Inject constructor(
                     source = EventSource.KAKAO
                 )
             }
+
+            kakaoRepository.insertMessages(newMessages)
+
+            val latestAt = newMessages.maxOf { it.sentAt }
+            kakaoRepository.updateLastImported(room.id, latestAt)
 
             if (events.isNotEmpty()) eventRepository.insertAll(events)
 

@@ -50,11 +50,16 @@ private val DATE_FMT_DAY = DateTimeFormatter.ofPattern("d일")
 @Composable
 fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
-    onEventClick: (String) -> Unit
+    onEventClick: (String) -> Unit,
+    onNeedsInit: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showKakaoMenu by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.needsInit) {
+        if (state.needsInit) onNeedsInit()
+    }
 
     val kakaoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()

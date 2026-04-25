@@ -30,6 +30,11 @@ fun AppNavigation(startDestination: String) {
             TimelineScreen(
                 onEventClick = { eventId ->
                     navController.navigate(Screen.EventDetail.createRoute(eventId))
+                },
+                onNeedsInit = {
+                    navController.navigate(Screen.Init.route) {
+                        popUpTo(Screen.Timeline.route) { inclusive = true }
+                    }
                 }
             )
         }

@@ -87,6 +87,12 @@ class InitViewModel @Inject constructor(
             _uiState.update { it.copy(error = "사진, 이름, 생년월일, 성별을 모두 입력해주세요") }
             return
         }
+        if (!faceEmbedder.isAvailable()) {
+            _uiState.update {
+                it.copy(error = "얼굴 인식 모델 파일이 없습니다.\nREADME를 참고해 assets/mobile_face_net.tflite 파일을 추가해주세요.")
+            }
+            return
+        }
         _uiState.update { it.copy(step = InitStep.Scanning, error = null) }
         scanJob = viewModelScope.launch(Dispatchers.IO) { performScan() }
     }
