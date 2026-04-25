@@ -1,12 +1,37 @@
+# ── Gradle 빌드 출력 ──────────────────────────────────────────────────
+**/build/
+.gradle/
+
+# ── 로컬 설정 (기기마다 다름) ─────────────────────────────────────────
+local.properties
 *.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+
+# ── Android Studio / IntelliJ ─────────────────────────────────────────
+.idea/
+*.iws
+.navigation/
+
+# ── 서명 및 키 관련 ───────────────────────────────────────────────────
 *.jks
-app/release/
+*.keystore
+keystore.properties
+
+# ── 빌드 아티팩트 ─────────────────────────────────────────────────────
+*.apk
+*.aab
+*.ap_
+captures/
+
+# ── 네이티브 빌드 ─────────────────────────────────────────────────────
+.externalNativeBuild/
+.cxx/
+
+# ── 대용량 바이너리 (별도 배포) ───────────────────────────────────────
 app/src/main/assets/mobile_face_net.tflite
+
+# ── OS 자동 생성 ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Claude Code 로컬 설정 ─────────────────────────────────────────────
+.claude/settings.local.json
