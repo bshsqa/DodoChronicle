@@ -51,7 +51,8 @@ private val DATE_FMT_DAY = DateTimeFormatter.ofPattern("d일")
 fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
     onEventClick: (String) -> Unit,
-    onNeedsInit: () -> Unit = {}
+    onNeedsInit: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
@@ -91,6 +92,9 @@ fun TimelineScreen(
                             tint = if (state.onlyFavorite) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurface
                         )
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "설정")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

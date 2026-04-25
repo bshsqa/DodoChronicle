@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import com.bshsqa.dodochronicle.presentation.detail.EventDetailScreen
 import com.bshsqa.dodochronicle.presentation.init.InitScreen
 import com.bshsqa.dodochronicle.presentation.init.InitViewModel
+import com.bshsqa.dodochronicle.presentation.settings.SettingsScreen
 import com.bshsqa.dodochronicle.presentation.timeline.TimelineScreen
 
 @Composable
@@ -35,7 +36,20 @@ fun AppNavigation(startDestination: String) {
                     navController.navigate(Screen.Init.route) {
                         popUpTo(Screen.Timeline.route) { inclusive = true }
                     }
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Screen.Settings.route)
                 }
+            )
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onNavigateToInit = {
+                    navController.navigate(Screen.Init.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
         composable(Screen.EventDetail.route) { backStack ->
