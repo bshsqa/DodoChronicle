@@ -26,7 +26,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.bshsqa.dodochronicle.presentation.navigation.AppNavigation
 import com.bshsqa.dodochronicle.presentation.navigation.Screen
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 DodoTheme {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         val context = LocalContext.current
-                        val lifecycleOwner = LocalLifecycleOwner.current
+                        val lifecycleOwner = context as LifecycleOwner
 
                         val startDest = if (initialized) Screen.Timeline.route else Screen.Init.route
 

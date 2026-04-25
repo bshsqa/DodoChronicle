@@ -56,7 +56,8 @@ class SyncNewPhotosUseCase @Inject constructor(
         val needsConfirmation = mutableListOf<PendingPhoto>()
 
         for ((uri, takenAt) in toProcess) {
-            val bitmap = loadBitmap(uri) ?: run {
+            val bitmap = loadBitmap(uri)
+            if (bitmap == null) {
                 processed++
                 emit(SyncProgress(processed, toProcess.size, autoAdded, needsConfirmation.toList()))
                 continue
@@ -69,7 +70,8 @@ class SyncNewPhotosUseCase @Inject constructor(
                 continue
             }
 
-            val embedding = faceEmbedder.embed(bitmap, faces.first()) ?: run {
+            val embedding = faceEmbedder.embed(bitmap, faces.first())
+            if (embedding == null) {
                 processed++
                 emit(SyncProgress(processed, toProcess.size, autoAdded, needsConfirmation.toList()))
                 continue
