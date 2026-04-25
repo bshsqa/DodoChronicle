@@ -15,7 +15,7 @@ import javax.inject.Singleton
 
 private const val MODEL_FILE = "mobile_face_net.tflite"
 private const val INPUT_SIZE = 112
-private const val EMBEDDING_SIZE = 128
+private const val EMBEDDING_SIZE = 192
 
 fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
     var dot = 0f; var normA = 0f; var normB = 0f
