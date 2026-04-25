@@ -2,8 +2,10 @@ package com.bshsqa.dodochronicle.presentation.timeline
 
 import android.content.Context
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSource
@@ -54,6 +56,9 @@ class TimelineViewModel @Inject constructor(
             childId = child.id
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
 
+            // Run photo sync in parallel with event collection
+            launch { syncNewPhotos() }
+
             combine(_filterCategory, _onlyFavorite) { cat, fav -> cat to fav }
                 .flatMapLatest { (cat, fav) ->
                     eventRepository.observe(childId, cat, fav)
@@ -62,6 +67,45 @@ class TimelineViewModel @Inject constructor(
                     _state.update { it.copy(events = events) }
                 }
         }
+    }
+
+    private suspend fun syncNewPhotos() {
+        try {
+            val lastScanAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
+            val newPhotos = queryNewPhotos(lastScanAt)
+            if (newPhotos.isEmpty()) return
+
+            syncUseCase.invoke(newPhotos).collect { progress ->
+                _state.update { it.copy(pendingPhotos = progress.needsConfirmation) }
+            }
+        } catch (_: Exception) {
+            // Sync failure is non-fatal; pending photos remain empty
+        }
+    }
+
+    private fun queryNewPhotos(after: Long): List<Pair<String, Long>> {
+        val uris = mutableListOf<Pair<String, Long>>()
+        val limit = BuildConfig.PHOTO_SCAN_LIMIT
+
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_TAKEN),
+            "${MediaStore.Images.Media.DATE_TAKEN} > ?",
+            arrayOf(after.toString()),
+            "${MediaStore.Images.Media.DATE_TAKEN} DESC"
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            var count = 0
+            while (cursor.moveToNext() && (limit < 0 || count < limit)) {
+                val id = cursor.getLong(idCol)
+                val taken = cursor.getLong(dateCol)
+                val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+                uris.add(uri.toString() to taken)
+                count++
+            }
+        }
+        return uris
     }
 
     fun setFilterCategory(category: EventCategory?) {

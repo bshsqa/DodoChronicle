@@ -12,8 +12,6 @@ import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Child
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
-import com.bshsqa.dodochronicle.domain.repository.EventRepository
-import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
 import com.bshsqa.dodochronicle.ml.FaceCluster
 import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
 import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
@@ -28,7 +26,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.InputStream
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
@@ -53,19 +50,16 @@ data class InitUiState(
     val totalCount: Int = 0,
     val clusters: List<ClusterUiModel> = emptyList(),
     val selectedClusterIds: Set<Int> = emptySet(),
-    val error: String? = null,
-    val importResult: String? = null
+    val error: String? = null
 )
 
 @HiltViewModel
 class InitViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
-    private val eventRepository: EventRepository,
     private val faceDetector: FaceDetectorHelper,
     private val faceEmbedder: FaceEmbedder,
     private val clusteringEngine: FaceClusteringEngine,
-    private val importKakaoUseCase: ImportKakaoUseCase,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -152,19 +146,7 @@ class InitViewModel @Inject constructor(
         }
     }
 
-    fun importKakao(stream: InputStream) {
-        viewModelScope.launch {
-            when (val result = importKakaoUseCase(stream)) {
-                is ImportKakaoUseCase.Result.Success ->
-                    _uiState.update { it.copy(importResult = "메시지 ${result.addedMessages}개, 이벤트 ${result.addedEvents}개 추가") }
-                is ImportKakaoUseCase.Result.Error ->
-                    _uiState.update { it.copy(error = result.message) }
-            }
-        }
-    }
-
     fun dismissError() = _uiState.update { it.copy(error = null) }
-    fun dismissImportResult() = _uiState.update { it.copy(importResult = null) }
 
     private fun queryPhotos(): List<Pair<String, Long>> {
         val uris = mutableListOf<Pair<String, Long>>()
