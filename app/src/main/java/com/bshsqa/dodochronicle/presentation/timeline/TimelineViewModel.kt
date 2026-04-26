@@ -9,11 +9,13 @@ import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
+import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -45,6 +47,7 @@ class TimelineViewModel @Inject constructor(
     private val manageEventUseCase: ManageEventUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
     private val importKakaoUseCase: ImportKakaoUseCase,
+    private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -136,7 +139,29 @@ class TimelineViewModel @Inject constructor(
     fun deleteEvent(id: String) {
         viewModelScope.launch {
             manageEventUseCase.delete(id)
+            updateEmbeddingUseCase(childId)
             _state.update { it.copy(snackbar = "이벤트가 삭제되었습니다") }
+        }
+    }
+
+    /** 다중 선택 모드에서 사진 이벤트 일괄 삭제 */
+    fun deletePhotoEventsBatch(eventIds: List<String>) {
+        viewModelScope.launch {
+            manageEventUseCase.deleteEventsBatch(eventIds)
+            updateEmbeddingUseCase(childId)
+            _state.update { it.copy(snackbar = "${eventIds.size}개 사진이 삭제되었습니다") }
+        }
+    }
+
+    /** 선택된 사진들의 학습 제외 상태를 일괄 토글 */
+    fun setExcludeFromModelBatch(photoRecords: List<PhotoRecord>, excluded: Boolean) {
+        viewModelScope.launch {
+            photoRecords.forEach { record ->
+                manageEventUseCase.setExcludeFromModel(record.id, excluded)
+            }
+            updateEmbeddingUseCase(childId)
+            val msg = if (excluded) "학습에서 제외되었습니다" else "학습에 포함되었습니다"
+            _state.update { it.copy(snackbar = msg) }
         }
     }
 
@@ -177,6 +202,7 @@ class TimelineViewModel @Inject constructor(
     fun confirmPendingPhoto(pending: SyncNewPhotosUseCase.PendingPhoto, accept: Boolean) {
         viewModelScope.launch {
             syncUseCase.confirmPhoto(pending, accept, childId)
+            if (accept) updateEmbeddingUseCase(childId)
             _state.update { s ->
                 s.copy(pendingPhotos = s.pendingPhotos.filter { it.uri != pending.uri })
             }
@@ -195,6 +221,8 @@ class TimelineViewModel @Inject constructor(
             for (pending in rejected) {
                 syncUseCase.confirmPhoto(pending, false, childId)
             }
+
+            if (accepted.isNotEmpty()) updateEmbeddingUseCase(childId)
 
             _state.update { s ->
                 val processedUris = acceptedUris + rejectedUris

@@ -6,5 +6,6 @@ data class PhotoRecord(
     val localUri: String,
     val takenAt: Long,
     val faceEmbedding: FloatArray = floatArrayOf(),
-    val similarityScore: Float = 0f
+    val similarityScore: Float = 0f,
+    val isExcludedFromModel: Boolean = false
 )

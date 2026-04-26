@@ -28,9 +28,6 @@ fun AppNavigation(startDestination: String) {
         }
         composable(Screen.Timeline.route) {
             TimelineScreen(
-                onEventClick = { eventId ->
-                    navController.navigate(Screen.EventDetail.createRoute(eventId))
-                },
                 onNeedsInit = {
                     navController.navigate(Screen.Init.route) {
                         popUpTo(Screen.Timeline.route) { inclusive = true }

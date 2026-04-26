@@ -15,7 +15,7 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         KakaoRoomEntity::class,
         KakaoMessageEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -30,6 +30,13 @@ abstract class DodoDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
                     "ALTER TABLE children ADD COLUMN gender TEXT NOT NULL DEFAULT 'MALE'"
+                )
+            }
+        }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE photo_records ADD COLUMN isExcludedFromModel INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }

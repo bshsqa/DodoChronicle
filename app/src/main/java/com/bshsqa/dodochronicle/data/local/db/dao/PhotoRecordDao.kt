@@ -24,6 +24,17 @@ interface PhotoRecordDao {
     @Query("SELECT MAX(takenAt) FROM photo_records")
     suspend fun getLatestTakenAt(): Long?
 
+    @Query("UPDATE photo_records SET isExcludedFromModel = :excluded WHERE id = :id")
+    suspend fun setExcludedFromModel(id: String, excluded: Boolean)
+
+    @Query("""
+        SELECT faceEmbeddingJson FROM photo_records
+        WHERE isExcludedFromModel = 0
+        ORDER BY takenAt DESC
+        LIMIT 50
+    """)
+    suspend fun getLatest50Embeddings(): List<String>
+
     @Query("DELETE FROM photo_records")
     suspend fun deleteAll()
 }

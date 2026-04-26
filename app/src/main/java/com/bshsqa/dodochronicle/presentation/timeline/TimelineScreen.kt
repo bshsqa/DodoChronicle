@@ -6,9 +6,11 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -24,12 +26,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -48,7 +52,6 @@ private fun scaleToZoom(scale: Float) = when {
 @Composable
 fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
-    onEventClick: (String) -> Unit,
     onNeedsInit: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
@@ -56,6 +59,7 @@ fun TimelineScreen(
     var showKakaoMenu by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
+    var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
 
     LaunchedEffect(state.needsInit) {
         if (state.needsInit) onNeedsInit()
@@ -128,16 +132,34 @@ fun TimelineScreen(
             if (state.events.isEmpty()) {
                 EmptyTimeline(modifier = Modifier.weight(1f))
             } else {
-                TimelineContent(
+                GroupedTimelineContent(
                     events = state.events,
                     birthDate = state.birthDate,
-                    onEventClick = onEventClick,
-                    onToggleFavorite = viewModel::toggleFavorite,
-                    onDelete = viewModel::deleteEvent,
+                    onDayClick = { date -> selectedDetailDate = date },
                     modifier = Modifier.weight(1f)
                 )
             }
         }
+    }
+
+    // 날짜별 상세 다이얼로그
+    val detailDate = selectedDetailDate
+    if (detailDate != null) {
+        val dayEvents = state.events.filter { it.date == detailDate }
+        DailyDetailDialog(
+            date = detailDate,
+            events = dayEvents,
+            onDismiss = { selectedDetailDate = null },
+            onDeleteBatch = { ids ->
+                viewModel.deletePhotoEventsBatch(ids)
+                selectedDetailDate = null
+            },
+            onExcludeBatch = { records, excluded ->
+                viewModel.setExcludeFromModelBatch(records, excluded)
+            },
+            onToggleFavorite = viewModel::toggleFavorite,
+            onDelete = { id -> viewModel.deleteEvent(id) }
+        )
     }
 
     if (showAddDialog) {
@@ -225,85 +247,6 @@ private fun CategoryFilterRow(selected: EventCategory?, onSelect: (EventCategory
     }
 }
 
-@Composable
-private fun TimelineContent(
-    events: List<Event>,
-    birthDate: LocalDate?,
-    onEventClick: (String) -> Unit,
-    onToggleFavorite: (Event) -> Unit,
-    onDelete: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    val density = LocalDensity.current
-    val today = LocalDate.now()
-    val startDate = birthDate ?: (today.minusYears(3))
-    val totalDays = ChronoUnit.DAYS.between(startDate, today).toFloat().coerceAtLeast(1f)
-
-    val baseHeightInitial = with(density) { 2000.dp.toPx() }
-    var offsetY by remember { mutableFloatStateOf(-(baseHeightInitial - with(density) { 400.dp.toPx() })) }
-    val zoomLevel by remember { derivedStateOf { scaleToZoom(scale) } }
-
-    val timelineBarWidth = 56.dp
-
-    Box(modifier = modifier
-        .fillMaxSize()
-        .pointerInput(Unit) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                do {
-                    val event = awaitPointerEvent()
-                    val zoom = event.calculateZoom()
-                    val pan = event.calculatePan()
-                    if (zoom != 1f || pan != Offset.Zero) {
-                        scale = (scale * zoom).coerceIn(0.2f, 12f)
-                        offsetY = (offsetY + pan.y)
-                        event.changes.forEach { it.consume() }
-                    }
-                } while (event.changes.any { it.pressed })
-            }
-        }
-    ) {
-        val baseHeightPx = baseHeightInitial * scale
-        val clampedOffset = offsetY.coerceIn(-baseHeightPx + with(density) { 200.dp.toPx() }, 0f)
-
-        Row(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            ) {
-                events.forEach { event ->
-                    val daysSinceBirth = ChronoUnit.DAYS.between(startDate, event.date).toFloat()
-                    val fraction = (daysSinceBirth / totalDays).coerceIn(0f, 1f)
-                    val yPx = fraction * baseHeightPx + clampedOffset
-
-                    Box(modifier = Modifier
-                        .offset { IntOffset(0, yPx.toInt()) }
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        EventCard(
-                            event = event,
-                            onClick = { onEventClick(event.id) },
-                            onToggleFavorite = { onToggleFavorite(event) },
-                            onDelete = { onDelete(event.id) }
-                        )
-                    }
-                }
-            }
-
-            TimelineBar(
-                modifier = Modifier.width(timelineBarWidth).fillMaxHeight(),
-                startDate = startDate,
-                today = today,
-                totalDays = totalDays,
-                offsetY = clampedOffset,
-                baseHeightPx = baseHeightPx,
-                zoomLevel = zoomLevel,
-                events = events
-            )
-        }
-    }
-}
 
 @Composable
 private fun TimelineBar(
@@ -545,7 +488,7 @@ private fun PendingPhotosDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.heightIn(max = 400.dp)
             ) {
-                items(photos) { photo ->
+                gridItems(photos) { photo ->
                     val isSelected = selectedUris.contains(photo.uri)
                     Box(
                         modifier = Modifier
@@ -678,4 +621,341 @@ private fun AddEventDialog(onDismiss: () -> Unit, onAdd: (LocalDate, EventCatego
             dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("취소") } }
         ) { DatePicker(state = dateState) }
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 날짜별 그룹 타임라인 (메인 뷰 교체 컴포저블)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun GroupedTimelineContent(
+    events: List<Event>,
+    birthDate: LocalDate?,
+    onDayClick: (LocalDate) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(grouped.keys.toList(), key = { it.toString() }) { date ->
+            val dayEvents = grouped[date] ?: emptyList()
+            DailyEventCard(
+                date = date,
+                events = dayEvents,
+                onClick = { onDayClick(date) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun DailyEventCard(
+    date: LocalDate,
+    events: List<Event>,
+    onClick: () -> Unit
+) {
+    val photos = events.filter { it.category == EventCategory.PHOTO }
+    val texts = events.filter { it.category != EventCategory.PHOTO }
+    val dateLabel = date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일"))
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // 날짜 헤더
+            Text(
+                dateLabel,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(8.dp))
+
+            // 사진 미리보기 (최대 4장)
+            if (photos.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    photos.take(4).forEachIndexed { idx, event ->
+                        Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                            AsyncImage(
+                                model = event.content,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            // 4장 이상이면 마지막 썸네일에 "+N" 오버레이
+                            if (idx == 3 && photos.size > 4) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black.copy(alpha = 0.5f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "+${photos.size - 4}",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // 사진이 4장 미만이면 빈 weight 채우기
+                    repeat((4 - photos.size).coerceAtLeast(0)) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                if (texts.isNotEmpty()) Spacer(Modifier.height(8.dp))
+            }
+
+            // 텍스트 이벤트 요약
+            texts.take(2).forEach { event ->
+                Text(
+                    "• ${event.content}",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (texts.size > 2) {
+                Text(
+                    "외 ${texts.size - 2}개",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 날짜 상세 다이얼로그 (사진 다중선택 + 학습 제외)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DailyDetailDialog(
+    date: LocalDate,
+    events: List<Event>,
+    onDismiss: () -> Unit,
+    onDeleteBatch: (List<String>) -> Unit,
+    onExcludeBatch: (List<PhotoRecord>, Boolean) -> Unit,
+    onToggleFavorite: (Event) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val photos = events.filter { it.category == EventCategory.PHOTO }
+    val texts  = events.filter { it.category != EventCategory.PHOTO }
+
+    // 다중 선택 상태 (eventId 기준)
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    val isSelectMode = selectedIds.isNotEmpty()
+
+    // 선택된 사진들의 PhotoRecord를 얻으려면 UI상에서 event.content(uri)로 대리
+    // 실제 PhotoRecord 모델은 여기서 직접 접근 불가(VM을 통해야 함)
+    // → 단순화: exclude 판단은 Event에 없으므로, 선택 시 isExcluded 상태를 별도 mutableStateMap으로 관리
+    val excludedEventIds = remember { mutableStateMapOf<String, Boolean>() }
+
+    val selectedPhotoEvents = photos.filter { it.id in selectedIds }
+    val selectedExcludeStates = selectedPhotoEvents.map { excludedEventIds[it.id] ?: false }
+    val allSameExcludeState = selectedExcludeStates.toSet().size <= 1
+    val currentExcludeState = selectedExcludeStates.firstOrNull() ?: false
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isSelectMode) onDismiss()
+            else selectedIds = setOf()
+        },
+        title = {
+            if (isSelectMode) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { selectedIds = setOf() }) {
+                        Icon(Icons.Default.Close, contentDescription = "선택 취소")
+                    }
+                    Text("${selectedIds.size}개 선택됨", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.weight(1f))
+                    // 학습 제외 토글 (혼합 상태면 비활성화)
+                    IconButton(
+                        onClick = {
+                            val fakeRecords = selectedPhotoEvents.map { ev ->
+                                PhotoRecord(
+                                    id = ev.id, eventId = ev.id,
+                                    localUri = ev.content, takenAt = 0L,
+                                    isExcludedFromModel = currentExcludeState
+                                )
+                            }
+                            val newExcluded = !currentExcludeState
+                            onExcludeBatch(fakeRecords, newExcluded)
+                            selectedPhotoEvents.forEach { excludedEventIds[it.id] = newExcluded }
+                            selectedIds = setOf()
+                        },
+                        enabled = allSameExcludeState && selectedIds.isNotEmpty()
+                    ) {
+                        Icon(
+                            if (currentExcludeState) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (currentExcludeState) "학습 포함" else "학습 제외",
+                            tint = if (allSameExcludeState) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    // 삭제 버튼 (항상 활성화)
+                    IconButton(
+                        onClick = {
+                            onDeleteBatch(selectedIds.toList())
+                            selectedIds = setOf()
+                        }
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "삭제",
+                            tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            } else {
+                Text(date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일")))
+            }
+        },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 사진 그리드
+                if (photos.isNotEmpty()) {
+                    item {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.heightIn(max = 360.dp)
+                        ) {
+                            gridItems(photos, key = { it.id }) { event ->
+                                val isSelected = event.id in selectedIds
+                                val isExcluded = excludedEventIds[event.id] ?: false
+
+                                Box(
+                                    modifier = Modifier
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .combinedClickable(
+                                            onClick = {
+                                                if (isSelectMode) {
+                                                    selectedIds = if (isSelected)
+                                                        selectedIds - event.id
+                                                    else selectedIds + event.id
+                                                }
+                                            },
+                                            onLongClick = {
+                                                selectedIds = selectedIds + event.id
+                                            }
+                                        )
+                                ) {
+                                    AsyncImage(
+                                        model = event.content,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    // 선택 오버레이
+                                    if (isSelectMode) {
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize()
+                                                    .background(Color.Black.copy(alpha = 0.35f))
+                                            )
+                                        }
+                                        Icon(
+                                            if (isSelected) Icons.Default.CheckCircle
+                                            else Icons.Default.RadioButtonUnchecked,
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                                   else Color.White,
+                                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                                        )
+                                    }
+                                    // 학습 제외 마커
+                                    if (isExcluded) {
+                                        Icon(
+                                            Icons.Default.VisibilityOff,
+                                            contentDescription = "학습 제외",
+                                            tint = Color.White,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(4.dp)
+                                                .size(16.dp)
+                                                .background(Color.Black.copy(alpha = 0.5f),
+                                                    RoundedCornerShape(4.dp))
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 텍스트 이벤트 목록
+                if (texts.isNotEmpty()) {
+                    item {
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    items(texts, key = { it.id }) { event ->
+                        var showMenu by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { showMenu = true }
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            val color = categoryColor(event.category)
+                            AssistChip(
+                                onClick = {},
+                                label = { Text(categoryLabel(event.category),
+                                    style = MaterialTheme.typography.labelSmall) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = color.copy(alpha = 0.12f),
+                                    labelColor = color
+                                ),
+                                border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(event.content,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (event.isFavorite) "즐겨찾기 해제" else "즐겨찾기") },
+                                leadingIcon = {
+                                    Icon(if (event.isFavorite) Icons.Default.StarBorder
+                                         else Icons.Default.Star, null)
+                                },
+                                onClick = { onToggleFavorite(event); showMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("삭제", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, null,
+                                        tint = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = { onDelete(event.id); showMenu = false }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!isSelectMode) {
+                TextButton(onClick = onDismiss) { Text("닫기") }
+            }
+        }
+    )
 }

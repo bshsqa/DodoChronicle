@@ -34,10 +34,21 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun deleteAllForChild(childId: String) = eventDao.deleteAllForChild(childId)
 
     override suspend fun insertPhotoRecord(record: PhotoRecord) = photoDao.insert(record.toEntity())
+    override suspend fun insertAllPhotoRecords(records: List<PhotoRecord>) =
+        photoDao.insertAll(records.map { it.toEntity() })
     override suspend fun getLatestPhotoTakenAt(): Long? = photoDao.getLatestTakenAt()
     override suspend fun getAllPhotoUris(): List<String> = photoDao.getAllUris()
     override suspend fun deletePhotoRecord(id: String) = photoDao.deleteById(id)
+    override suspend fun deletePhotoRecordsBatch(ids: List<String>) {
+        ids.forEach { photoDao.deleteById(it) }
+    }
     override suspend fun deleteAllPhotoRecords() = photoDao.deleteAll()
+    override suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean) =
+        photoDao.setExcludedFromModel(photoRecordId, excluded)
+    override suspend fun getLatest50Embeddings(): List<FloatArray> =
+        photoDao.getLatest50Embeddings().map { json ->
+            try { Json.decodeFromString<List<Float>>(json).toFloatArray() } catch (e: Exception) { floatArrayOf() }
+        }.filter { it.isNotEmpty() }
 
     override fun observePhotosForEvent(eventId: String): Flow<List<PhotoRecord>> =
         photoDao.observeForEvent(eventId).map { list -> list.map { it.toDomain() } }
@@ -62,12 +73,14 @@ class EventRepositoryImpl @Inject constructor(
     private fun PhotoRecordEntity.toDomain() = PhotoRecord(
         id = id, eventId = eventId, localUri = localUri, takenAt = takenAt,
         faceEmbedding = try { Json.decodeFromString<List<Float>>(faceEmbeddingJson).toFloatArray() } catch (e: Exception) { floatArrayOf() },
-        similarityScore = similarityScore
+        similarityScore = similarityScore,
+        isExcludedFromModel = isExcludedFromModel
     )
 
     private fun PhotoRecord.toEntity() = PhotoRecordEntity(
         id = id, eventId = eventId, localUri = localUri, takenAt = takenAt,
         faceEmbeddingJson = Json.encodeToString(faceEmbedding.toList()),
-        similarityScore = similarityScore
+        similarityScore = similarityScore,
+        isExcludedFromModel = isExcludedFromModel
     )
 }

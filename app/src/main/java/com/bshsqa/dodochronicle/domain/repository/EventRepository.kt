@@ -20,9 +20,13 @@ interface EventRepository {
     suspend fun deleteAllForChild(childId: String)
 
     suspend fun insertPhotoRecord(record: PhotoRecord)
+    suspend fun insertAllPhotoRecords(records: List<PhotoRecord>)
     suspend fun getLatestPhotoTakenAt(): Long?
     fun observePhotosForEvent(eventId: String): Flow<List<PhotoRecord>>
     suspend fun deletePhotoRecord(id: String)
+    suspend fun deletePhotoRecordsBatch(ids: List<String>)
     suspend fun getAllPhotoUris(): List<String>
     suspend fun deleteAllPhotoRecords()
+    suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean)
+    suspend fun getLatest50Embeddings(): List<FloatArray>
 }

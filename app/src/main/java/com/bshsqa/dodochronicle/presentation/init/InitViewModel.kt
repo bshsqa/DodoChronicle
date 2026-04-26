@@ -11,9 +11,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Child
+import com.bshsqa.dodochronicle.domain.model.Event
+import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.model.Gender
+import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
-import com.bshsqa.dodochronicle.ml.FaceCluster
+import com.bshsqa.dodochronicle.domain.repository.EventRepository
+import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
 import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
@@ -30,7 +35,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 
@@ -62,6 +69,8 @@ data class InitUiState(
 class InitViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
+    private val eventRepository: EventRepository,
+    private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val faceDetector: FaceDetectorHelper,
     private val faceEmbedder: FaceEmbedder,
     private val clusteringEngine: FaceClusteringEngine,
@@ -71,7 +80,8 @@ class InitViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(InitUiState())
     val uiState: StateFlow<InitUiState> = _uiState.asStateFlow()
 
-    private var _rawClusters: List<FaceCluster> = emptyList()
+    // clusterID → 해당 클러스터에 속하는 PhotoEmbedding 목록
+    private var _rawClusterPhotos: Map<Int, List<PhotoEmbedding>> = emptyMap()
     private var scanJob: Job? = null
 
     fun setChildName(name: String) = _uiState.update { it.copy(childName = name) }
@@ -100,7 +110,7 @@ class InitViewModel @Inject constructor(
     fun cancelScanning() {
         scanJob?.cancel()
         scanJob = null
-        _rawClusters = emptyList()
+        _rawClusterPhotos = emptyMap()
         _uiState.update { state ->
             state.copy(
                 step = InitStep.ChildInfo,
@@ -140,7 +150,13 @@ class InitViewModel @Inject constructor(
             _uiState.update { it.copy(step = InitStep.ChildInfo, error = "아이 얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요") }
             return
         }
-        _rawClusters = clusters
+        // clusterID → PhotoEmbedding 목록으로 역매핑 저장
+        _rawClusterPhotos = clusters.associate { cluster ->
+            cluster.id to embeddings.filter { pe ->
+                cluster.representativeUris.contains(pe.uri) ||
+                    cluster.embeddings.any { it.contentEquals(pe.embedding) }
+            }
+        }
         val clusterUi = clusters.map { c ->
             ClusterUiModel(c.id, c.representativeUris, c.embeddings.size)
         }
@@ -162,18 +178,56 @@ class InitViewModel @Inject constructor(
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val embeddings = _rawClusters
-                .filter { it.id in state.selectedClusterIds }
-                .map { it.averageEmbedding }
+            // 1. Child 저장
             val child = Child(
                 id = UUID.randomUUID().toString(),
                 name = state.childName,
                 birthDate = state.birthDate!!,
                 gender = state.gender!!,
                 referencePhotoUri = state.referencePhotoUri,
-                faceEmbeddings = embeddings
+                faceEmbeddings = emptyList() // UpdateChildEmbeddingUseCase 로 채워질 예정
             )
             childRepository.save(child)
+
+            // 2. 선택된 클러스터의 PhotoEmbedding 목록으로 Event + PhotoRecord 일괄 등록
+            val events = mutableListOf<Event>()
+            val photoRecords = mutableListOf<PhotoRecord>()
+
+            for (clusterId in state.selectedClusterIds) {
+                val photoEmbeddings = _rawClusterPhotos[clusterId] ?: continue
+                for (pe in photoEmbeddings) {
+                    val date = Instant.ofEpochMilli(pe.takenAt)
+                        .atZone(ZoneId.systemDefault()).toLocalDate()
+                    val eventId = UUID.randomUUID().toString()
+                    events.add(
+                        Event(
+                            id = eventId,
+                            childId = child.id,
+                            date = date,
+                            category = EventCategory.PHOTO,
+                            content = pe.uri,
+                            source = EventSource.PHOTO
+                        )
+                    )
+                    photoRecords.add(
+                        PhotoRecord(
+                            id = UUID.randomUUID().toString(),
+                            eventId = eventId,
+                            localUri = pe.uri,
+                            takenAt = pe.takenAt,
+                            faceEmbedding = pe.embedding,
+                            similarityScore = 1f
+                        )
+                    )
+                }
+            }
+
+            eventRepository.insertAll(events)
+            eventRepository.insertAllPhotoRecords(photoRecords)
+
+            // 3. 최신 50장 기준으로 기준 임베딩 벡터 갱신
+            updateEmbeddingUseCase(child.id)
+
             dataStore.edit { prefs -> prefs[KEY_INITIALIZED] = true }
             _uiState.update { it.copy(step = InitStep.Done) }
         }
