@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,7 +27,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
-import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -40,10 +40,6 @@ private fun scaleToZoom(scale: Float) = when {
     else -> ZoomLevel.DAY
 }
 
-private val DATE_FMT_YEAR = DateTimeFormatter.ofPattern("yyyy")
-private val DATE_FMT_MONTH = DateTimeFormatter.ofPattern("yy.MM")
-private val DATE_FMT_WEEK = DateTimeFormatter.ofPattern("MM/dd")
-private val DATE_FMT_DAY = DateTimeFormatter.ofPattern("d일")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +77,7 @@ fun TimelineScreen(
                 title = { Text(state.childName.ifBlank { "DodoChronicle" }) },
                 actions = {
                     IconButton(onClick = { showKakaoMenu = true }) {
-                        Icon(Icons.Default.Chat, contentDescription = "카카오 import")
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "카카오 import")
                     }
                     IconButton(onClick = viewModel::toggleFavoriteFilter) {
                         Icon(
@@ -150,7 +146,7 @@ fun TimelineScreen(
     if (showKakaoMenu) {
         AlertDialog(
             onDismissRequest = { showKakaoMenu = false },
-            icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+            icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
             title = { Text("카카오톡 대화 import") },
             text = { Text(".txt 파일을 선택하면 대화를 분석하여 이벤트를 추출합니다.") },
             confirmButton = {
@@ -213,8 +209,6 @@ private fun TimelineContent(
         .fillMaxSize()
         .pointerInput(Unit) {
             awaitEachGesture {
-                var lastPan = Offset.Zero
-                var lastZoom = 1f
                 awaitFirstDown(requireUnconsumed = false)
                 do {
                     val event = awaitPointerEvent()
@@ -261,7 +255,6 @@ private fun TimelineContent(
                 startDate = startDate,
                 today = today,
                 totalDays = totalDays,
-                scale = scale,
                 offsetY = clampedOffset,
                 baseHeightPx = baseHeightPx,
                 zoomLevel = zoomLevel,
@@ -277,7 +270,6 @@ private fun TimelineBar(
     startDate: LocalDate,
     today: LocalDate,
     totalDays: Float,
-    scale: Float,
     offsetY: Float,
     baseHeightPx: Float,
     zoomLevel: ZoomLevel,
@@ -385,7 +377,7 @@ private fun EventCard(
                         containerColor = categoryColor.copy(alpha = 0.12f),
                         labelColor = categoryColor
                     ),
-                    border = AssistChipDefaults.assistChipBorder(enabled = true, borderColor = categoryColor.copy(alpha = 0.3f))
+                    border = BorderStroke(1.dp, categoryColor.copy(alpha = 0.3f))
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (event.isFavorite) {
@@ -480,7 +472,7 @@ private fun PendingPhotosBanner(count: Int, onConfirm: () -> Unit, onReject: () 
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.HelpOutline, contentDescription = null,
+            Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer)
             Spacer(Modifier.width(8.dp))
             Text("확인 필요한 사진 ${count}장",
