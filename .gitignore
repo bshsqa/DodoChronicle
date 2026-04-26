@@ -55,5 +55,23 @@ captures/
 # Google Services (e.g. APIs or Firebase)
 google-services.json
 
+# Secrets / API keys (never commit these)
+secrets.properties
+*.env
+keystore.properties
+
 # macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# ML model files (add manually to assets/)
+*.tflite
+
+# Heap dumps
+*.hprof
+
+# kapt / KSP generated sources (covered by build/, but explicit)
+app/build/generated/
