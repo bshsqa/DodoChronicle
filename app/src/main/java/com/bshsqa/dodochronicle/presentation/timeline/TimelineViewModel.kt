@@ -183,6 +183,26 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun processPendingPhotos(acceptedUris: Set<String>, rejectedUris: Set<String>) {
+        viewModelScope.launch {
+            val currentPending = _state.value.pendingPhotos
+            val accepted = currentPending.filter { it.uri in acceptedUris }
+            val rejected = currentPending.filter { it.uri in rejectedUris }
+
+            for (pending in accepted) {
+                syncUseCase.confirmPhoto(pending, true, childId)
+            }
+            for (pending in rejected) {
+                syncUseCase.confirmPhoto(pending, false, childId)
+            }
+
+            _state.update { s ->
+                val processedUris = acceptedUris + rejectedUris
+                s.copy(pendingPhotos = s.pendingPhotos.filter { it.uri !in processedUris })
+            }
+        }
+    }
+
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
 
     fun resetApp() {

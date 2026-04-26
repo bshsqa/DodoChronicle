@@ -6,6 +6,9 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -52,6 +55,7 @@ fun TimelineScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showKakaoMenu by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
+    var showPendingDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.needsInit) {
         if (state.needsInit) onNeedsInit()
@@ -114,6 +118,13 @@ fun TimelineScreen(
                 onSelect = viewModel::setFilterCategory
             )
 
+            if (state.pendingPhotos.isNotEmpty()) {
+                PendingPhotosBanner(
+                    count = state.pendingPhotos.size,
+                    onClick = { showPendingDialog = true }
+                )
+            }
+
             if (state.events.isEmpty()) {
                 EmptyTimeline(modifier = Modifier.weight(1f))
             } else {
@@ -124,14 +135,6 @@ fun TimelineScreen(
                     onToggleFavorite = viewModel::toggleFavorite,
                     onDelete = viewModel::deleteEvent,
                     modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (state.pendingPhotos.isNotEmpty()) {
-                PendingPhotosBanner(
-                    count = state.pendingPhotos.size,
-                    onConfirm = { viewModel.confirmPendingPhoto(state.pendingPhotos.first(), true) },
-                    onReject = { viewModel.confirmPendingPhoto(state.pendingPhotos.first(), false) }
                 )
             }
         }
@@ -183,6 +186,17 @@ fun TimelineScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showPendingDialog && state.pendingPhotos.isNotEmpty()) {
+        PendingPhotosDialog(
+            photos = state.pendingPhotos,
+            onDismiss = { showPendingDialog = false },
+            onConfirm = { acceptedUris, rejectedUris ->
+                viewModel.processPendingPhotos(acceptedUris, rejectedUris)
+                showPendingDialog = false
             }
         )
     }
@@ -489,27 +503,106 @@ private fun EmptyTimeline(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PendingPhotosBanner(count: Int, onConfirm: () -> Unit, onReject: () -> Unit) {
+private fun PendingPhotosBanner(count: Int, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.secondaryContainer,
         tonalElevation = 4.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer)
             Spacer(Modifier.width(8.dp))
-            Text("확인 필요한 사진 ${count}장",
+            Text("확인 필요한 사진이 ${count}장 있습니다. 확인하시겠습니까?",
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer)
-            TextButton(onClick = onReject) { Text("아니오") }
-            TextButton(onClick = onConfirm) { Text("맞아요") }
+            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(16.dp))
         }
     }
+}
+
+@Composable
+private fun PendingPhotosDialog(
+    photos: List<com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PendingPhoto>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<String>, Set<String>) -> Unit
+) {
+    val selectedUris = remember { mutableStateListOf(*photos.map { it.uri }.toTypedArray()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("확인 필요한 사진") },
+        text = {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.heightIn(max = 400.dp)
+            ) {
+                items(photos) { photo ->
+                    val isSelected = selectedUris.contains(photo.uri)
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                if (isSelected) selectedUris.remove(photo.uri)
+                                else selectedUris.add(photo.uri)
+                            }
+                    ) {
+                        AsyncImage(
+                            model = photo.uri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.3f))
+                            )
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val accepted = selectedUris.toSet()
+                    val rejected = photos.map { it.uri }.toSet() - accepted
+                    onConfirm(accepted, rejected)
+                }
+            ) { Text("적용") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
