@@ -51,6 +51,7 @@ fun TimelineScreen(
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showKakaoMenu by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.needsInit) {
         if (state.needsInit) onNeedsInit()
@@ -86,6 +87,9 @@ fun TimelineScreen(
                             tint = if (state.onlyFavorite) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurface
                         )
+                    }
+                    IconButton(onClick = { showResetDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "설정")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -156,6 +160,29 @@ fun TimelineScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showKakaoMenu = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("앱 데이터 초기화") },
+            text = { Text("앱 데이터를 초기화합니다.\n갤러리 사진은 변경되지 않습니다.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetDialog = false
+                        viewModel.resetApp()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("초기화")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) { Text("취소") }
             }
         )
     }

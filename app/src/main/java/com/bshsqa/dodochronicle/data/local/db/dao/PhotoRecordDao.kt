@@ -23,4 +23,7 @@ interface PhotoRecordDao {
 
     @Query("SELECT MAX(takenAt) FROM photo_records")
     suspend fun getLatestTakenAt(): Long?
+
+    @Query("DELETE FROM photo_records")
+    suspend fun deleteAll()
 }

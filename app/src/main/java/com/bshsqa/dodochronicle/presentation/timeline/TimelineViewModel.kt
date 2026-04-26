@@ -21,6 +21,9 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 
 data class TimelineUiState(
     val childName: String = "",
@@ -41,7 +44,8 @@ class TimelineViewModel @Inject constructor(
     private val eventRepository: EventRepository,
     private val manageEventUseCase: ManageEventUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
-    private val importKakaoUseCase: ImportKakaoUseCase
+    private val importKakaoUseCase: ImportKakaoUseCase,
+    private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TimelineUiState())
@@ -180,4 +184,16 @@ class TimelineViewModel @Inject constructor(
     }
 
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
+
+    fun resetApp() {
+        viewModelScope.launch {
+            if (childId.isNotEmpty()) {
+                eventRepository.deleteAllForChild(childId)
+            }
+            eventRepository.deleteAllPhotoRecords()
+            childRepository.deleteAll()
+            dataStore.edit { it.clear() }
+            _state.update { it.copy(needsInit = true) }
+        }
+    }
 }

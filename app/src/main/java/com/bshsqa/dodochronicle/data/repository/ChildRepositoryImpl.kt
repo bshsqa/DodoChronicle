@@ -32,6 +32,8 @@ class ChildRepositoryImpl @Inject constructor(
 
     override suspend fun delete(child: Child) = dao.delete(child.toEntity())
 
+    override suspend fun deleteAll() = dao.deleteAll()
+
     private fun ChildEntity.toDomain(): Child {
         val embeddings = try {
             Json.decodeFromString<List<List<Float>>>(faceEmbeddingsJson)

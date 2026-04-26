@@ -37,6 +37,7 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun getLatestPhotoTakenAt(): Long? = photoDao.getLatestTakenAt()
     override suspend fun getAllPhotoUris(): List<String> = photoDao.getAllUris()
     override suspend fun deletePhotoRecord(id: String) = photoDao.deleteById(id)
+    override suspend fun deleteAllPhotoRecords() = photoDao.deleteAll()
 
     override fun observePhotosForEvent(eventId: String): Flow<List<PhotoRecord>> =
         photoDao.observeForEvent(eventId).map { list -> list.map { it.toDomain() } }

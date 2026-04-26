@@ -24,4 +24,5 @@ interface EventRepository {
     fun observePhotosForEvent(eventId: String): Flow<List<PhotoRecord>>
     suspend fun deletePhotoRecord(id: String)
     suspend fun getAllPhotoUris(): List<String>
+    suspend fun deleteAllPhotoRecords()
 }

@@ -23,4 +23,7 @@ interface ChildDao {
 
     @Delete
     suspend fun delete(child: ChildEntity)
+
+    @Query("DELETE FROM children")
+    suspend fun deleteAll()
 }

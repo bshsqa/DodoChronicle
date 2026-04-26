@@ -9,4 +9,5 @@ interface ChildRepository {
     suspend fun save(child: Child)
     suspend fun updateEmbeddings(childId: String, embeddings: List<FloatArray>)
     suspend fun delete(child: Child)
+    suspend fun deleteAll()
 }
