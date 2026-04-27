@@ -118,28 +118,51 @@ fun TimelineScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            CategoryFilterRow(
-                selected = state.filterCategory,
-                onSelect = viewModel::setFilterCategory
-            )
-
-            if (state.pendingPhotos.isNotEmpty()) {
-                PendingPhotosBanner(
-                    count = state.pendingPhotos.size,
-                    onClick = { showPendingDialog = true }
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                CategoryFilterRow(
+                    selected = state.filterCategory,
+                    onSelect = viewModel::setFilterCategory
                 )
+
+                if (state.pendingPhotos.isNotEmpty()) {
+                    PendingPhotosBanner(
+                        count = state.pendingPhotos.size,
+                        onClick = { showPendingDialog = true }
+                    )
+                }
+
+                if (state.events.isEmpty()) {
+                    EmptyTimeline(modifier = Modifier.weight(1f))
+                } else {
+                    GroupedTimelineContent(
+                        events = state.events,
+                        birthDate = state.birthDate,
+                        onDayClick = { date -> selectedDetailDate = date },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            if (state.events.isEmpty()) {
-                EmptyTimeline(modifier = Modifier.weight(1f))
-            } else {
-                GroupedTimelineContent(
-                    events = state.events,
-                    birthDate = state.birthDate,
-                    onDayClick = { date -> selectedDetailDate = date },
-                    modifier = Modifier.weight(1f)
-                )
+            if (state.isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "카카오 대화 분석 중...",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
             }
         }
     }

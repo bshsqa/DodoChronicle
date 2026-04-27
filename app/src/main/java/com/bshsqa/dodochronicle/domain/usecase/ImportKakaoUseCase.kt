@@ -24,7 +24,9 @@ class ImportKakaoUseCase @Inject constructor(
             val addedMessages: Int,
             val addedEvents: Int,
             val apiRequests: Int = 0,
-            val totalTokens: Int = 0
+            val totalTokens: Int = 0,
+            val failedChunks: Int = 0,
+            val apiKeyMissing: Boolean = false
         ) : Result()
         data class Error(val message: String) : Result()
     }
@@ -83,7 +85,9 @@ class ImportKakaoUseCase @Inject constructor(
                 addedMessages = newMessages.size,
                 addedEvents = events.size,
                 apiRequests = extractionResult.stats.requestCount,
-                totalTokens = extractionResult.stats.totalTokens
+                totalTokens = extractionResult.stats.totalTokens,
+                failedChunks = extractionResult.stats.failedChunks,
+                apiKeyMissing = extractionResult.stats.apiKeyMissing
             )
         } catch (e: Exception) {
             Result.Error(e.message ?: "알 수 없는 오류")

@@ -199,9 +199,14 @@ class TimelineViewModel @Inject constructor(
             val r = stream.use { importKakaoUseCase(it, roomAlias) }
             when (r) {
                 is ImportKakaoUseCase.Result.Success -> {
-                    val tokenStr = if (r.totalTokens > 0) ", 토큰 ${"%,d".format(r.totalTokens)}개" else ""
-                    val reqStr = if (r.apiRequests > 0) " (API ${r.apiRequests}회$tokenStr)" else ""
-                    _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨$reqStr") }
+                    val aiInfo = when {
+                        r.apiKeyMissing -> " (AI 키 미설정 — 이벤트 추출 생략)"
+                        r.failedChunks > 0 && r.apiRequests == 0 -> " (AI 호출 전체 실패)"
+                        r.failedChunks > 0 -> " (API ${r.apiRequests}회 성공, ${r.failedChunks}회 실패)"
+                        r.apiRequests > 0 -> " (API ${r.apiRequests}회, 토큰 ${"%,d".format(r.totalTokens)}개)"
+                        else -> ""
+                    }
+                    _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨$aiInfo") }
                 }
                 is ImportKakaoUseCase.Result.Error ->
                     _state.update { it.copy(snackbar = r.message) }

@@ -2,6 +2,7 @@ package com.bshsqa.dodochronicle.ai
 
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.KakaoMessage
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,12 @@ data class ExtractedEvent(
     val rawExcerpt: String? = null
 )
 
-data class ExtractionStats(val requestCount: Int, val totalTokens: Int)
+data class ExtractionStats(
+    val requestCount: Int,
+    val totalTokens: Int,
+    val failedChunks: Int = 0,
+    val apiKeyMissing: Boolean = false
+)
 
 data class ExtractionResult(val events: List<ExtractedEvent>, val stats: ExtractionStats)
 
@@ -43,28 +49,32 @@ class GeminiEventClassifier @Inject constructor(
     suspend fun extractEvents(
         messages: List<KakaoMessage>,
         childName: String,
-        chunkSize: Int = 150
+        chunkSize: Int = 400
     ): ExtractionResult = withContext(Dispatchers.IO) {
-        if (messages.isEmpty() || apiKey.isBlank()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0))
+        if (messages.isEmpty()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0))
+        if (apiKey.isBlank()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0, apiKeyMissing = true))
 
         val chunks = buildChunks(messages, chunkSize)
         val allEvents = mutableListOf<ExtractedEvent>()
         var totalRequests = 0
         var totalTokens = 0
+        var failedChunks = 0
 
         chunks.forEachIndexed { index, chunk ->
-            if (index > 0) delay(4000)
+            if (index > 0) delay(12000) // 분당 5회 (12초 간격)
             try {
                 val (events, tokens) = extractFromChunk(chunk, childName)
                 allEvents += events
-                totalRequests++
                 totalTokens += tokens
-            } catch (_: Exception) {
-                // 청크 실패 시 건너뛰고 계속 진행
+                if (tokens > 0 || events.isNotEmpty()) totalRequests++
+                else failedChunks++ // HTTP 오류 또는 빈 응답
+            } catch (e: Exception) {
+                Log.e("Gemini", "Chunk failed: ${e.message}", e)
+                failedChunks++
             }
         }
 
-        ExtractionResult(allEvents, ExtractionStats(totalRequests, totalTokens))
+        ExtractionResult(allEvents, ExtractionStats(totalRequests, totalTokens, failedChunks))
     }
 
     private fun buildChunks(messages: List<KakaoMessage>, chunkSize: Int): List<List<KakaoMessage>> {
@@ -105,7 +115,7 @@ class GeminiEventClassifier @Inject constructor(
                 "generationConfig" to mapOf(
                     "responseMimeType" to "application/json",
                     "temperature" to 0.2,
-                    "maxOutputTokens" to 4096
+                    "maxOutputTokens" to 8192
                 )
             )
         ).toRequestBody(json)
@@ -113,9 +123,18 @@ class GeminiEventClassifier @Inject constructor(
         val request = Request.Builder().url(url).post(body).build()
 
         return httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return Pair(emptyList(), 0)
-            val raw = response.body?.string() ?: return Pair(emptyList(), 0)
+            val raw = response.body?.string()
+            if (!response.isSuccessful) {
+                Log.e("Gemini", "HTTP ${response.code}: $raw")
+                return Pair(emptyList(), 0)
+            }
+            if (raw == null) {
+                Log.e("Gemini", "Empty response body")
+                return Pair(emptyList(), 0)
+            }
+            Log.d("Gemini", "Response: $raw")
             val (events, tokens) = parseResponse(raw)
+            Log.d("Gemini", "Parsed ${events.size} events, $tokens tokens")
             Pair(events, tokens)
         }
     }

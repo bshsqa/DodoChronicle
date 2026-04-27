@@ -30,13 +30,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProps["GEMINI_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"gemini-2.0-flash-lite\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"gemini-3.1-flash-lite-preview\"")
     }
 
     buildTypes {
         debug {
             isDebuggable = true
-            buildConfigField("int", "PHOTO_SCAN_LIMIT", "100")
+            buildConfigField("int", "PHOTO_SCAN_LIMIT", "30")
         }
         release {
             isMinifyEnabled = true
