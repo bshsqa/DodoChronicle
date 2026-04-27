@@ -1,6 +1,7 @@
 package com.bshsqa.dodochronicle.presentation.timeline
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
@@ -14,11 +15,12 @@ import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
-import com.bshsqa.dodochronicle.ai.ChunkProgress
-import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
+import com.bshsqa.dodochronicle.service.ImportState
+import com.bshsqa.dodochronicle.service.ImportStateHolder
+import com.bshsqa.dodochronicle.service.KakaoImportService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -69,8 +71,8 @@ class TimelineViewModel @Inject constructor(
     private val kakaoRepository: KakaoRepository,
     private val manageEventUseCase: ManageEventUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
-    private val importKakaoUseCase: ImportKakaoUseCase,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
+    private val importStateHolder: ImportStateHolder,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -80,7 +82,6 @@ class TimelineViewModel @Inject constructor(
     private val _filterCategory = MutableStateFlow<EventCategory?>(null)
     private val _onlyFavorite = MutableStateFlow(false)
     private var childId: String = ""
-    @Volatile private var importCancelled = false
 
     init {
         viewModelScope.launch {
@@ -97,6 +98,47 @@ class TimelineViewModel @Inject constructor(
             launch {
                 kakaoRepository.observeRooms().collect { rooms ->
                     _state.update { it.copy(kakaoRooms = rooms) }
+                }
+            }
+
+            launch {
+                importStateHolder.state.collect { importState ->
+                    when (importState) {
+                        is ImportState.Idle -> _state.update {
+                            it.copy(isLoading = false, importProgress = null)
+                        }
+                        is ImportState.Running -> _state.update {
+                            it.copy(
+                                isLoading = true,
+                                importProgress = if (importState.totalChunks == 0) null
+                                else ImportProgress(importState.chunksDone, importState.totalChunks, importState.dateRange)
+                            )
+                        }
+                        is ImportState.Done -> {
+                            importStateHolder.reset()
+                            _state.update {
+                                it.copy(
+                                    isLoading = false,
+                                    importProgress = null,
+                                    importDone = ImportDoneInfo(
+                                        addedMessages = importState.addedMessages,
+                                        addedEvents = importState.addedEvents,
+                                        apiRequests = importState.apiRequests,
+                                        totalTokens = importState.totalTokens,
+                                        failedChunks = importState.failedChunks,
+                                        elapsedSeconds = importState.elapsedSeconds,
+                                        cancelled = importState.cancelled
+                                    )
+                                )
+                            }
+                        }
+                        is ImportState.Error -> {
+                            importStateHolder.reset()
+                            _state.update {
+                                it.copy(snackbar = importState.message, isLoading = false, importProgress = null)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -215,59 +257,28 @@ class TimelineViewModel @Inject constructor(
     }
 
     fun importKakao(uri: Uri, roomAlias: String) {
-        viewModelScope.launch {
-            importCancelled = false
-            val startTime = System.currentTimeMillis()
-            _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
-            val stream = context.contentResolver.openInputStream(uri)
-            if (stream == null) {
-                _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
-                return@launch
+        _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
+        context.startForegroundService(
+            Intent(context, KakaoImportService::class.java).apply {
+                action = KakaoImportService.ACTION_START
+                putExtra(KakaoImportService.EXTRA_URI, uri.toString())
+                putExtra(KakaoImportService.EXTRA_ROOM_ALIAS, roomAlias)
             }
-            val r = stream.use {
-                importKakaoUseCase(
-                    it, roomAlias,
-                    onProgress = { progress ->
-                        _state.update { s ->
-                            s.copy(importProgress = ImportProgress(
-                                chunksDone = progress.chunkIndex,
-                                totalChunks = progress.totalChunks,
-                                dateRange = progress.dateRange
-                            ))
-                        }
-                    },
-                    isCancelled = { importCancelled }
-                )
-            }
-            val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
-            when (r) {
-                is ImportKakaoUseCase.Result.Success -> _state.update {
-                    it.copy(
-                        isLoading = false,
-                        importProgress = null,
-                        importDone = ImportDoneInfo(
-                            addedMessages = r.addedMessages,
-                            addedEvents = r.addedEvents,
-                            apiRequests = r.apiRequests,
-                            totalTokens = r.totalTokens,
-                            failedChunks = r.failedChunks,
-                            elapsedSeconds = elapsedSeconds,
-                            cancelled = r.cancelled
-                        )
-                    )
-                }
-                is ImportKakaoUseCase.Result.Error -> _state.update {
-                    it.copy(snackbar = r.message, isLoading = false, importProgress = null)
-                }
-            }
-        }
+        )
     }
 
     fun cancelImport() {
-        importCancelled = true
+        context.startService(
+            Intent(context, KakaoImportService::class.java).apply {
+                action = KakaoImportService.ACTION_CANCEL
+            }
+        )
     }
 
-    fun dismissImportResult() = _state.update { it.copy(importDone = null) }
+    fun dismissImportResult() {
+        importStateHolder.reset()
+        _state.update { it.copy(importDone = null) }
+    }
 
     fun confirmPendingPhoto(pending: SyncNewPhotosUseCase.PendingPhoto, accept: Boolean) {
         viewModelScope.launch {

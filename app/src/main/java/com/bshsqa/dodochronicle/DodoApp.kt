@@ -24,19 +24,23 @@ class DodoApp : Application(), Configuration.Provider {
     }
 
     private fun createNotificationChannels() {
-        val scanChannel = NotificationChannel(
-            SCAN_CHANNEL_ID,
-            "사진 분석",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "초기화 시 사진 분석 진행 상황을 알립니다."
-            setShowBadge(false)
-        }
-        getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(scanChannel)
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(SCAN_CHANNEL_ID, "사진 분석", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "초기화 시 사진 분석 진행 상황을 알립니다."
+                setShowBadge(false)
+            }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(IMPORT_CHANNEL_ID, "카카오 대화 가져오기", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "카카오 대화 가져오기 진행 상황을 알립니다."
+                setShowBadge(false)
+            }
+        )
     }
 
     companion object {
-        const val SCAN_CHANNEL_ID = "scan_channel"
+        const val SCAN_CHANNEL_ID   = "scan_channel"
+        const val IMPORT_CHANNEL_ID = "import_channel"
     }
 }
