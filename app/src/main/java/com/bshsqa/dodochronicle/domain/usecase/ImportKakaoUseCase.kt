@@ -1,5 +1,6 @@
 package com.bshsqa.dodochronicle.domain.usecase
 
+import com.bshsqa.dodochronicle.ai.ChunkProgress
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventSource
@@ -31,7 +32,11 @@ class ImportKakaoUseCase @Inject constructor(
         data class Error(val message: String) : Result()
     }
 
-    suspend operator fun invoke(inputStream: InputStream, roomAlias: String): Result {
+    suspend operator fun invoke(
+        inputStream: InputStream,
+        roomAlias: String,
+        onProgress: ((ChunkProgress) -> Unit)? = null
+    ): Result {
         return try {
             val child = childRepository.getFirst() ?: return Result.Error("아이 정보가 없습니다")
             val content = inputStream.bufferedReader(Charsets.UTF_8).readText()
@@ -49,7 +54,7 @@ class ImportKakaoUseCase @Inject constructor(
             val lastImportedAt = kakaoRepository.getLatestMessageSentAt(room.id) ?: 0L
             val newMessages = parsed.messages
                 .filter { it.sentAt > lastImportedAt }
-                .filter { !kakaoRepository.messageExistsByHash(it.contentHash) }
+                .filter { !kakaoRepository.messageExistsByHashInRoom(room.id, it.contentHash) }
                 .map { it.copy(roomId = room.id) }
 
             if (newMessages.isEmpty()) return Result.Success(0, 0)
@@ -58,7 +63,8 @@ class ImportKakaoUseCase @Inject constructor(
             val textMessages = newMessages.filter { it.content != "사진" && it.content != "동영상" }
             val extractionResult = geminiClassifier.extractEvents(
                 messages = textMessages,
-                childName = child.name
+                childName = child.name,
+                onProgress = onProgress
             )
 
             val events = extractionResult.events.map { extracted ->

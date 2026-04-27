@@ -37,6 +37,12 @@ data class ExtractionStats(
 
 data class ExtractionResult(val events: List<ExtractedEvent>, val stats: ExtractionStats)
 
+data class ChunkProgress(
+    val chunkIndex: Int,
+    val totalChunks: Int,
+    val dateRange: String
+)
+
 @Singleton
 class GeminiEventClassifier @Inject constructor(
     private val httpClient: OkHttpClient,
@@ -49,7 +55,8 @@ class GeminiEventClassifier @Inject constructor(
     suspend fun extractEvents(
         messages: List<KakaoMessage>,
         childName: String,
-        chunkSize: Int = 400
+        chunkSize: Int = 400,
+        onProgress: ((ChunkProgress) -> Unit)? = null
     ): ExtractionResult = withContext(Dispatchers.IO) {
         if (messages.isEmpty()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0))
         if (apiKey.isBlank()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0, apiKeyMissing = true))
@@ -61,6 +68,12 @@ class GeminiEventClassifier @Inject constructor(
         var failedChunks = 0
 
         chunks.forEachIndexed { index, chunk ->
+            if (onProgress != null) {
+                val dates = chunk.map {
+                    Instant.ofEpochMilli(it.sentAt).atZone(ZoneId.of("Asia/Seoul")).toLocalDate()
+                }
+                onProgress(ChunkProgress(index, chunks.size, "${dates.first()} ~ ${dates.last()}"))
+            }
             if (index > 0) delay(12000) // 분당 5회 (12초 간격)
             try {
                 val (events, tokens) = extractFromChunk(chunk, childName)

@@ -145,6 +145,14 @@ fun TimelineScreen(
             }
 
             if (state.isLoading) {
+                var elapsedSeconds by remember { mutableLongStateOf(0L) }
+                LaunchedEffect(Unit) {
+                    val startAt = System.currentTimeMillis()
+                    while (true) {
+                        elapsedSeconds = (System.currentTimeMillis() - startAt) / 1000
+                        kotlinx.coroutines.delay(1000)
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -153,13 +161,40 @@ fun TimelineScreen(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .background(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
                             "카카오 대화 분석 중...",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val progress = state.importProgress
+                        if (progress != null) {
+                            Text(
+                                "청크 ${progress.chunksDone + 1} / ${progress.totalChunks}",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                progress.dateRange,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        val minutes = elapsedSeconds / 60
+                        val seconds = elapsedSeconds % 60
+                        Text(
+                            "경과: ${if (minutes > 0) "${minutes}분 " else ""}${seconds}초",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }

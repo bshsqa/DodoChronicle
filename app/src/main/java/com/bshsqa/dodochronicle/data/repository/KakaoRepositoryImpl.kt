@@ -33,8 +33,8 @@ class KakaoRepositoryImpl @Inject constructor(
     override suspend fun updateLastImported(roomId: String, timestamp: Long) =
         roomDao.updateLastImported(roomId, timestamp)
 
-    override suspend fun messageExistsByHash(hash: String): Boolean =
-        messageDao.existsByHash(hash)
+    override suspend fun messageExistsByHashInRoom(roomId: String, hash: String): Boolean =
+        messageDao.existsByHashInRoom(roomId, hash)
 
     override suspend fun insertMessages(messages: List<KakaoMessage>) =
         messageDao.insertAll(messages.map {

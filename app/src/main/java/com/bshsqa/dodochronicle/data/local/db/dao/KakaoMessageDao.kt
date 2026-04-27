@@ -8,8 +8,8 @@ interface KakaoMessageDao {
     @Query("SELECT * FROM kakao_messages WHERE roomId = :roomId AND sentAt > :after ORDER BY sentAt ASC")
     suspend fun getAfter(roomId: String, after: Long): List<KakaoMessageEntity>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM kakao_messages WHERE contentHash = :hash)")
-    suspend fun existsByHash(hash: String): Boolean
+    @Query("SELECT EXISTS(SELECT 1 FROM kakao_messages WHERE contentHash = :hash AND roomId = :roomId)")
+    suspend fun existsByHashInRoom(roomId: String, hash: String): Boolean
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(messages: List<KakaoMessageEntity>)

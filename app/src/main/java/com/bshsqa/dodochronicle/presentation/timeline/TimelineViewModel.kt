@@ -14,6 +14,7 @@ import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
+import com.bshsqa.dodochronicle.ai.ChunkProgress
 import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
@@ -29,6 +30,12 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 
+data class ImportProgress(
+    val chunksDone: Int,
+    val totalChunks: Int,
+    val dateRange: String
+)
+
 data class TimelineUiState(
     val childName: String = "",
     val birthDate: LocalDate? = null,
@@ -39,6 +46,7 @@ data class TimelineUiState(
     val kakaoRooms: List<KakaoRoom> = emptyList(),
     val snackbar: String? = null,
     val isLoading: Boolean = false,
+    val importProgress: ImportProgress? = null,
     val needsInit: Boolean = false
 )
 
@@ -190,13 +198,23 @@ class TimelineViewModel @Inject constructor(
 
     fun importKakao(uri: Uri, roomAlias: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            _state.update { it.copy(isLoading = true, importProgress = null) }
             val stream = context.contentResolver.openInputStream(uri)
             if (stream == null) {
                 _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
                 return@launch
             }
-            val r = stream.use { importKakaoUseCase(it, roomAlias) }
+            val r = stream.use {
+                importKakaoUseCase(it, roomAlias) { progress ->
+                    _state.update { s ->
+                        s.copy(importProgress = ImportProgress(
+                            chunksDone = progress.chunkIndex,
+                            totalChunks = progress.totalChunks,
+                            dateRange = progress.dateRange
+                        ))
+                    }
+                }
+            }
             when (r) {
                 is ImportKakaoUseCase.Result.Success -> {
                     val aiInfo = when {
@@ -211,7 +229,7 @@ class TimelineViewModel @Inject constructor(
                 is ImportKakaoUseCase.Result.Error ->
                     _state.update { it.copy(snackbar = r.message) }
             }
-            _state.update { it.copy(isLoading = false) }
+            _state.update { it.copy(isLoading = false, importProgress = null) }
         }
     }
 
