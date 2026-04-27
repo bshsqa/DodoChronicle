@@ -43,9 +43,9 @@ class KakaoParser @Inject constructor() {
             currentContent.clear()
         }
 
-        // PC 포맷 첫 줄(방이름)은 패턴 불일치로 자연스럽게 무시됨
-        // 모바일 포맷 첫 줄(날짜)은 dateOnlyPattern에 걸려 상태 리셋 후 무시됨
         for (line in lines) {
+            // 모바일 포맷 헤더 2줄 명시적 스킵
+            if (line.contains("님과 카카오톡 대화") || line.startsWith("저장한 날짜 :")) continue
             when {
                 dateOnlyPattern.matches(line) -> {
                     flush()

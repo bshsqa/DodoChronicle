@@ -36,6 +36,9 @@ class KakaoRepositoryImpl @Inject constructor(
     override suspend fun messageExistsByHashInRoom(roomId: String, hash: String): Boolean =
         messageDao.existsByHashInRoom(roomId, hash)
 
+    override suspend fun getAllHashesForRoom(roomId: String): Set<String> =
+        messageDao.getAllHashesForRoom(roomId).toHashSet()
+
     override suspend fun insertMessages(messages: List<KakaoMessage>) =
         messageDao.insertAll(messages.map {
             KakaoMessageEntity(it.id, it.roomId, it.sender, it.sentAt, it.content, it.contentHash)

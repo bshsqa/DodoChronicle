@@ -11,6 +11,7 @@ interface KakaoRepository {
     suspend fun upsertRoom(room: KakaoRoom)
     suspend fun updateLastImported(roomId: String, timestamp: Long)
     suspend fun messageExistsByHashInRoom(roomId: String, hash: String): Boolean
+    suspend fun getAllHashesForRoom(roomId: String): Set<String>
     suspend fun insertMessages(messages: List<KakaoMessage>)
     suspend fun getLatestMessageSentAt(roomId: String): Long?
     suspend fun deleteAll()

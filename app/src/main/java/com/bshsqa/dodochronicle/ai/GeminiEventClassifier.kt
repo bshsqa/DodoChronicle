@@ -1,6 +1,7 @@
 package com.bshsqa.dodochronicle.ai
 
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.Gender
 import com.bshsqa.dodochronicle.domain.model.KakaoMessage
 import android.util.Log
 import com.google.gson.Gson
@@ -16,6 +17,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -52,9 +54,13 @@ class GeminiEventClassifier @Inject constructor(
     private val gson = Gson()
     private val json = "application/json".toMediaType()
 
+    val hasApiKey: Boolean get() = apiKey.isNotBlank()
+
     suspend fun extractEvents(
         messages: List<KakaoMessage>,
         childName: String,
+        birthDate: LocalDate,
+        gender: Gender,
         chunkSize: Int = 400,
         onProgress: ((ChunkProgress) -> Unit)? = null
     ): ExtractionResult = withContext(Dispatchers.IO) {
@@ -69,18 +75,16 @@ class GeminiEventClassifier @Inject constructor(
 
         chunks.forEachIndexed { index, chunk ->
             if (onProgress != null) {
-                val dates = chunk.map {
-                    Instant.ofEpochMilli(it.sentAt).atZone(ZoneId.of("Asia/Seoul")).toLocalDate()
-                }
+                val dates = chunk.map { Instant.ofEpochMilli(it.sentAt).atZone(ZoneId.of("Asia/Seoul")).toLocalDate() }
                 onProgress(ChunkProgress(index, chunks.size, "${dates.first()} ~ ${dates.last()}"))
             }
-            if (index > 0) delay(12000) // 분당 5회 (12초 간격)
+            if (index > 0) delay(12000)
             try {
-                val (events, tokens) = extractFromChunk(chunk, childName)
+                val (events, tokens) = processChunk(chunk, childName, birthDate, gender)
                 allEvents += events
                 totalTokens += tokens
                 if (tokens > 0 || events.isNotEmpty()) totalRequests++
-                else failedChunks++ // HTTP 오류 또는 빈 응답
+                else failedChunks++
             } catch (e: Exception) {
                 Log.e("Gemini", "Chunk failed: ${e.message}", e)
                 failedChunks++
@@ -90,7 +94,7 @@ class GeminiEventClassifier @Inject constructor(
         ExtractionResult(allEvents, ExtractionStats(totalRequests, totalTokens, failedChunks))
     }
 
-    private fun buildChunks(messages: List<KakaoMessage>, chunkSize: Int): List<List<KakaoMessage>> {
+    internal fun buildChunks(messages: List<KakaoMessage>, chunkSize: Int = 400): List<List<KakaoMessage>> {
         val byDate = messages
             .groupBy { Instant.ofEpochMilli(it.sentAt).atZone(ZoneId.of("Asia/Seoul")).toLocalDate() }
             .toSortedMap()
@@ -109,9 +113,18 @@ class GeminiEventClassifier @Inject constructor(
         return chunks
     }
 
-    // Pair<이벤트 목록, 이번 청크 총 토큰 수>
-    private fun extractFromChunk(messages: List<KakaoMessage>, childName: String): Pair<List<ExtractedEvent>, Int> {
-        val msgText = messages.joinToString("\n") { msg ->
+    internal suspend fun processChunk(
+        chunk: List<KakaoMessage>,
+        childName: String,
+        birthDate: LocalDate,
+        gender: Gender
+    ): Pair<List<ExtractedEvent>, Int> = withContext(Dispatchers.IO) {
+        val chunkStartDate = Instant.ofEpochMilli(chunk.first().sentAt)
+            .atZone(ZoneId.of("Asia/Seoul")).toLocalDate()
+        val chunkEndDate = Instant.ofEpochMilli(chunk.last().sentAt)
+            .atZone(ZoneId.of("Asia/Seoul")).toLocalDate()
+
+        val msgText = chunk.joinToString("\n") { msg ->
             val date = Instant.ofEpochMilli(msg.sentAt)
                 .atZone(ZoneId.of("Asia/Seoul"))
                 .toLocalDate()
@@ -119,7 +132,7 @@ class GeminiEventClassifier @Inject constructor(
             "[$date] ${msg.sender}: ${msg.content}"
         }
 
-        val prompt = buildPrompt(msgText, childName)
+        val prompt = buildPrompt(msgText, childName, birthDate, gender, chunkStartDate, chunkEndDate)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
         val body = gson.toJson(
@@ -135,15 +148,15 @@ class GeminiEventClassifier @Inject constructor(
 
         val request = Request.Builder().url(url).post(body).build()
 
-        return httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).execute().use { response ->
             val raw = response.body?.string()
             if (!response.isSuccessful) {
                 Log.e("Gemini", "HTTP ${response.code}: $raw")
-                return Pair(emptyList(), 0)
+                return@use Pair(emptyList(), 0)
             }
             if (raw == null) {
                 Log.e("Gemini", "Empty response body")
-                return Pair(emptyList(), 0)
+                return@use Pair(emptyList(), 0)
             }
             Log.d("Gemini", "Response: $raw")
             val (events, tokens) = parseResponse(raw)
@@ -152,10 +165,30 @@ class GeminiEventClassifier @Inject constructor(
         }
     }
 
-    private fun buildPrompt(messages: String, childName: String) = """
+    private fun calculateAge(birthDate: LocalDate, refDate: LocalDate): String {
+        val months = ChronoUnit.MONTHS.between(birthDate, refDate).coerceAtLeast(0)
+        return if (months < 24) "${months}개월" else "${months / 12}세 ${months % 12}개월"
+    }
+
+    private fun buildPrompt(
+        messages: String,
+        childName: String,
+        birthDate: LocalDate,
+        gender: Gender,
+        chunkStartDate: LocalDate,
+        chunkEndDate: LocalDate
+    ): String {
+        val ageStart = calculateAge(birthDate, chunkStartDate)
+        val ageEnd = calculateAge(birthDate, chunkEndDate)
+        val ageStr = if (ageStart == ageEnd) ageStart else "$ageStart ~ $ageEnd"
+        val genderStr = if (gender == Gender.MALE) "남아" else "여아"
+
+        return """
 당신은 가족 카카오톡 대화에서 아이의 성장 관련 이벤트를 추출하는 전문가입니다.
 
 아이 이름: $childName
+생년월일: $birthDate
+이 대화 시점 나이: $ageStr ($genderStr)
 
 다음 규칙을 따르세요:
 - $childName 이(가) 직접 한 말, 행동, 성취, 신체 변화를 이벤트로 추출합니다
@@ -177,6 +210,7 @@ JSON 배열로만 응답하세요 (다른 텍스트 없이):
 
 이벤트가 없으면 []
 """.trimIndent()
+    }
 
     private data class GeminiResponse(val candidates: List<Candidate>?, val usageMetadata: UsageMetadata?)
     private data class Candidate(val content: Content?)
@@ -191,7 +225,6 @@ JSON 배열로만 응답하세요 (다른 텍스트 없이):
         @SerializedName("rawExcerpt") val rawExcerpt: String?
     )
 
-    // Pair<이벤트 목록, 토큰 수>
     private fun parseResponse(raw: String): Pair<List<ExtractedEvent>, Int> {
         return try {
             val geminiRes = gson.fromJson(raw, GeminiResponse::class.java)

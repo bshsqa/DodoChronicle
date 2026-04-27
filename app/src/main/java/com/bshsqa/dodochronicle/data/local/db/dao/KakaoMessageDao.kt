@@ -11,6 +11,9 @@ interface KakaoMessageDao {
     @Query("SELECT EXISTS(SELECT 1 FROM kakao_messages WHERE contentHash = :hash AND roomId = :roomId)")
     suspend fun existsByHashInRoom(roomId: String, hash: String): Boolean
 
+    @Query("SELECT contentHash FROM kakao_messages WHERE roomId = :roomId")
+    suspend fun getAllHashesForRoom(roomId: String): List<String>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(messages: List<KakaoMessageEntity>)
 

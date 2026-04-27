@@ -1,5 +1,6 @@
 package com.bshsqa.dodochronicle.domain.usecase
 
+import android.util.Log
 import com.bshsqa.dodochronicle.ai.ChunkProgress
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
@@ -9,6 +10,9 @@ import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.kakao.KakaoParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.util.UUID
 import javax.inject.Inject
@@ -27,7 +31,8 @@ class ImportKakaoUseCase @Inject constructor(
             val apiRequests: Int = 0,
             val totalTokens: Int = 0,
             val failedChunks: Int = 0,
-            val apiKeyMissing: Boolean = false
+            val apiKeyMissing: Boolean = false,
+            val cancelled: Boolean = false
         ) : Result()
         data class Error(val message: String) : Result()
     }
@@ -35,65 +40,119 @@ class ImportKakaoUseCase @Inject constructor(
     suspend operator fun invoke(
         inputStream: InputStream,
         roomAlias: String,
-        onProgress: ((ChunkProgress) -> Unit)? = null
-    ): Result {
-        return try {
-            val child = childRepository.getFirst() ?: return Result.Error("아이 정보가 없습니다")
+        onProgress: ((ChunkProgress) -> Unit)? = null,
+        isCancelled: (() -> Boolean)? = null
+    ): Result = withContext(Dispatchers.IO) {
+        try {
+            val child = childRepository.getFirst() ?: return@withContext Result.Error("아이 정보가 없습니다")
             val content = inputStream.bufferedReader(Charsets.UTF_8).readText()
             val parsed = kakaoParser.parse(content)
 
             var room = kakaoRepository.getRoomByName(roomAlias)
             if (room == null) {
-                room = KakaoRoom(
-                    id = UUID.randomUUID().toString(),
-                    roomName = roomAlias
-                )
+                room = KakaoRoom(id = UUID.randomUUID().toString(), roomName = roomAlias)
                 kakaoRepository.upsertRoom(room)
             }
 
             val lastImportedAt = kakaoRepository.getLatestMessageSentAt(room.id) ?: 0L
+            val existingHashes = kakaoRepository.getAllHashesForRoom(room.id)
             val newMessages = parsed.messages
                 .filter { it.sentAt > lastImportedAt }
-                .filter { !kakaoRepository.messageExistsByHashInRoom(room.id, it.contentHash) }
+                .filter { it.contentHash !in existingHashes }
                 .map { it.copy(roomId = room.id) }
+                .sortedBy { it.sentAt }
 
-            if (newMessages.isEmpty()) return Result.Success(0, 0)
+            if (newMessages.isEmpty()) return@withContext Result.Success(0, 0)
 
-            // AI 추출을 DB 쓰기 전에 실행 — 실패 시 DB에 아무것도 쓰이지 않아 재시도 가능
             val textMessages = newMessages.filter { it.content != "사진" && it.content != "동영상" }
-            val extractionResult = geminiClassifier.extractEvents(
-                messages = textMessages,
-                childName = child.name,
-                onProgress = onProgress
-            )
-
-            val events = extractionResult.events.map { extracted ->
-                Event(
-                    id = UUID.randomUUID().toString(),
-                    childId = child.id,
-                    date = extracted.date,
-                    category = extracted.category,
-                    content = extracted.content,
-                    longContent = extracted.longContent,
-                    rawExcerpt = extracted.rawExcerpt,
-                    source = EventSource.KAKAO
+            if (!geminiClassifier.hasApiKey || textMessages.isEmpty()) {
+                kakaoRepository.insertMessages(newMessages)
+                kakaoRepository.updateLastImported(room.id, newMessages.last().sentAt)
+                return@withContext Result.Success(
+                    addedMessages = newMessages.size,
+                    addedEvents = 0,
+                    apiKeyMissing = !geminiClassifier.hasApiKey
                 )
             }
 
-            kakaoRepository.insertMessages(newMessages)
+            val chunks = geminiClassifier.buildChunks(textMessages)
+            var lastSavedSentAt = lastImportedAt
+            var totalAddedMessages = 0
+            var totalAddedEvents = 0
+            var totalRequests = 0
+            var totalTokens = 0
+            var failedChunks = 0
+            var cancelled = false
 
-            val latestAt = newMessages.maxOf { it.sentAt }
-            kakaoRepository.updateLastImported(room.id, latestAt)
+            for ((index, chunk) in chunks.withIndex()) {
+                if (isCancelled?.invoke() == true) {
+                    cancelled = true
+                    break
+                }
 
-            if (events.isNotEmpty()) eventRepository.insertAll(events)
+                // rate limit 대기 — 이 동안 이전 청크 progress가 화면에 유지됨
+                if (index > 0) delay(12000L)
+
+                val chunkDates = chunk.map {
+                    java.time.Instant.ofEpochMilli(it.sentAt)
+                        .atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate()
+                }
+                onProgress?.invoke(ChunkProgress(index, chunks.size, "${chunkDates.first()} ~ ${chunkDates.last()}"))
+
+                val chunkEndTime = if (index < chunks.size - 1) {
+                    chunks[index + 1].first().sentAt - 1L
+                } else {
+                    newMessages.last().sentAt
+                }
+
+                val chunkMessages = newMessages.filter { it.sentAt > lastSavedSentAt && it.sentAt <= chunkEndTime }
+
+                try {
+                    val (events, tokens) = geminiClassifier.processChunk(
+                        chunk, child.name, child.birthDate, child.gender
+                    )
+
+                    kakaoRepository.insertMessages(chunkMessages)
+                    kakaoRepository.updateLastImported(room.id, chunkEndTime)
+                    lastSavedSentAt = chunkEndTime
+                    totalAddedMessages += chunkMessages.size
+
+                    val eventList = events.map { extracted ->
+                        Event(
+                            id = UUID.randomUUID().toString(),
+                            childId = child.id,
+                            date = extracted.date,
+                            category = extracted.category,
+                            content = extracted.content,
+                            longContent = extracted.longContent,
+                            rawExcerpt = extracted.rawExcerpt,
+                            source = EventSource.KAKAO
+                        )
+                    }
+                    if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)
+                    totalAddedEvents += eventList.size
+
+                    if (tokens > 0 || events.isNotEmpty()) totalRequests++
+                    else failedChunks++
+                    totalTokens += tokens
+
+                } catch (e: Exception) {
+                    Log.e("ImportKakao", "Chunk $index failed: ${e.message}", e)
+                    failedChunks++
+                    kakaoRepository.insertMessages(chunkMessages)
+                    kakaoRepository.updateLastImported(room.id, chunkEndTime)
+                    lastSavedSentAt = chunkEndTime
+                    totalAddedMessages += chunkMessages.size
+                }
+            }
 
             Result.Success(
-                addedMessages = newMessages.size,
-                addedEvents = events.size,
-                apiRequests = extractionResult.stats.requestCount,
-                totalTokens = extractionResult.stats.totalTokens,
-                failedChunks = extractionResult.stats.failedChunks,
-                apiKeyMissing = extractionResult.stats.apiKeyMissing
+                addedMessages = totalAddedMessages,
+                addedEvents = totalAddedEvents,
+                apiRequests = totalRequests,
+                totalTokens = totalTokens,
+                failedChunks = failedChunks,
+                cancelled = cancelled
             )
         } catch (e: Exception) {
             Result.Error(e.message ?: "알 수 없는 오류")

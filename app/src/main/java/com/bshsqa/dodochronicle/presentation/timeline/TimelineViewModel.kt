@@ -36,6 +36,16 @@ data class ImportProgress(
     val dateRange: String
 )
 
+data class ImportDoneInfo(
+    val addedMessages: Int,
+    val addedEvents: Int,
+    val apiRequests: Int,
+    val totalTokens: Int,
+    val failedChunks: Int,
+    val elapsedSeconds: Long,
+    val cancelled: Boolean
+)
+
 data class TimelineUiState(
     val childName: String = "",
     val birthDate: LocalDate? = null,
@@ -47,6 +57,7 @@ data class TimelineUiState(
     val snackbar: String? = null,
     val isLoading: Boolean = false,
     val importProgress: ImportProgress? = null,
+    val importDone: ImportDoneInfo? = null,
     val needsInit: Boolean = false
 )
 
@@ -69,6 +80,7 @@ class TimelineViewModel @Inject constructor(
     private val _filterCategory = MutableStateFlow<EventCategory?>(null)
     private val _onlyFavorite = MutableStateFlow(false)
     private var childId: String = ""
+    @Volatile private var importCancelled = false
 
     init {
         viewModelScope.launch {
@@ -204,40 +216,58 @@ class TimelineViewModel @Inject constructor(
 
     fun importKakao(uri: Uri, roomAlias: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, importProgress = null) }
+            importCancelled = false
+            val startTime = System.currentTimeMillis()
+            _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
             val stream = context.contentResolver.openInputStream(uri)
             if (stream == null) {
                 _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
                 return@launch
             }
             val r = stream.use {
-                importKakaoUseCase(it, roomAlias) { progress ->
-                    _state.update { s ->
-                        s.copy(importProgress = ImportProgress(
-                            chunksDone = progress.chunkIndex,
-                            totalChunks = progress.totalChunks,
-                            dateRange = progress.dateRange
-                        ))
-                    }
-                }
+                importKakaoUseCase(
+                    it, roomAlias,
+                    onProgress = { progress ->
+                        _state.update { s ->
+                            s.copy(importProgress = ImportProgress(
+                                chunksDone = progress.chunkIndex,
+                                totalChunks = progress.totalChunks,
+                                dateRange = progress.dateRange
+                            ))
+                        }
+                    },
+                    isCancelled = { importCancelled }
+                )
             }
+            val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
             when (r) {
-                is ImportKakaoUseCase.Result.Success -> {
-                    val aiInfo = when {
-                        r.apiKeyMissing -> " (AI 키 미설정 — 이벤트 추출 생략)"
-                        r.failedChunks > 0 && r.apiRequests == 0 -> " (AI 호출 전체 실패)"
-                        r.failedChunks > 0 -> " (API ${r.apiRequests}회 성공, ${r.failedChunks}회 실패)"
-                        r.apiRequests > 0 -> " (API ${r.apiRequests}회, 토큰 ${"%,d".format(r.totalTokens)}개)"
-                        else -> ""
-                    }
-                    _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨$aiInfo") }
+                is ImportKakaoUseCase.Result.Success -> _state.update {
+                    it.copy(
+                        isLoading = false,
+                        importProgress = null,
+                        importDone = ImportDoneInfo(
+                            addedMessages = r.addedMessages,
+                            addedEvents = r.addedEvents,
+                            apiRequests = r.apiRequests,
+                            totalTokens = r.totalTokens,
+                            failedChunks = r.failedChunks,
+                            elapsedSeconds = elapsedSeconds,
+                            cancelled = r.cancelled
+                        )
+                    )
                 }
-                is ImportKakaoUseCase.Result.Error ->
-                    _state.update { it.copy(snackbar = r.message) }
+                is ImportKakaoUseCase.Result.Error -> _state.update {
+                    it.copy(snackbar = r.message, isLoading = false, importProgress = null)
+                }
             }
-            _state.update { it.copy(isLoading = false, importProgress = null) }
         }
     }
+
+    fun cancelImport() {
+        importCancelled = true
+    }
+
+    fun dismissImportResult() = _state.update { it.copy(importDone = null) }
 
     fun confirmPendingPhoto(pending: SyncNewPhotosUseCase.PendingPhoto, accept: Boolean) {
         viewModelScope.launch {

@@ -196,8 +196,19 @@ fun TimelineScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
+                        TextButton(
+                            onClick = viewModel::cancelImport,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) { Text("취소") }
                     }
                 }
+            }
+
+            val importDone = state.importDone
+            if (importDone != null) {
+                ImportDoneOverlay(info = importDone, onConfirm = viewModel::dismissImportResult)
             }
         }
     }
@@ -1101,6 +1112,95 @@ private fun KakaoImportDialog(
             TextButton(onClick = onDismiss) { Text("취소") }
         }
     )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// import 완료 결과 오버레이
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.4f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 32.dp, vertical = 28.dp)
+        ) {
+            Icon(
+                if (info.cancelled) Icons.Default.Cancel else Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = if (info.cancelled) MaterialTheme.colorScheme.error
+                       else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp)
+            )
+            Text(
+                if (info.cancelled) "가져오기 취소됨" else "가져오기 완료",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+
+            val minutes = info.elapsedSeconds / 60
+            val seconds = info.elapsedSeconds % 60
+            val timeStr = if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
+
+            listOf(
+                "메시지" to "${info.addedMessages}개 저장",
+                "이벤트" to "${info.addedEvents}개 추출",
+                "소요 시간" to timeStr
+            ).forEach { (label, value) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(label, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(value, style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium)
+                }
+            }
+
+            if (info.apiRequests > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("API 요청", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${info.apiRequests}회 / 토큰 ${"%,d".format(info.totalTokens)}개",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium)
+                }
+            }
+            if (info.failedChunks > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("실패한 청크", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                    Text("${info.failedChunks}개", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
+                Text("확인")
+            }
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
