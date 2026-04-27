@@ -18,7 +18,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): DodoDatabase =
         Room.databaseBuilder(context, DodoDatabase::class.java, "dodo.db")
-            .addMigrations(DodoDatabase.MIGRATION_1_2, DodoDatabase.MIGRATION_2_3)
+            .addMigrations(DodoDatabase.MIGRATION_1_2, DodoDatabase.MIGRATION_2_3, DodoDatabase.MIGRATION_3_4)
             .fallbackToDestructiveMigration()
             .build()
 

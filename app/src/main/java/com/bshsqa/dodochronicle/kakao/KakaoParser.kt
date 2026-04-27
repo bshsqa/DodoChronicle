@@ -8,20 +8,19 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class ParsedResult(val roomName: String, val messages: List<KakaoMessage>)
+data class ParsedResult(val messages: List<KakaoMessage>)
 
 @Singleton
 class KakaoParser @Inject constructor() {
 
+    // "날짜+시간, 발신자 : 내용" 형태 — PC/모바일 공통 메시지 패턴
     private val msgPattern = Regex("""^(\d{4}년 \d{1,2}월 \d{1,2}일 (?:오전|오후) \d{1,2}:\d{2}), (.+?) : (.+)$""")
+
+    // 날짜+시간만 있는 줄 — 모바일 포맷 첫 줄 또는 날짜 구분선
     private val dateOnlyPattern = Regex("""^\d{4}년 \d{1,2}월 \d{1,2}일 (?:오전|오후) \d{1,2}:\d{2}$""")
-    private val roomNamePattern = Regex("""^(.+?) \d+ 님과 카카오톡 대화$""")
 
     fun parse(content: String): ParsedResult {
         val lines = content.lines()
-        val roomName = roomNamePattern.find(lines.firstOrNull() ?: "")?.groupValues?.get(1)
-            ?: "알 수 없는 방"
-
         val messages = mutableListOf<KakaoMessage>()
         var currentSender = ""
         var currentSentAt = 0L
@@ -44,9 +43,11 @@ class KakaoParser @Inject constructor() {
             currentContent.clear()
         }
 
-        for (line in lines.drop(2)) {
+        // PC 포맷 첫 줄(방이름)은 패턴 불일치로 자연스럽게 무시됨
+        // 모바일 포맷 첫 줄(날짜)은 dateOnlyPattern에 걸려 상태 리셋 후 무시됨
+        for (line in lines) {
             when {
-                dateOnlyPattern.matches(line) && !line.contains(",") -> {
+                dateOnlyPattern.matches(line) -> {
                     flush()
                     currentSentAt = 0L
                 }
@@ -63,7 +64,7 @@ class KakaoParser @Inject constructor() {
         }
         flush()
 
-        return ParsedResult(roomName, messages)
+        return ParsedResult(messages)
     }
 
     private fun parseDateTime(s: String): Long {

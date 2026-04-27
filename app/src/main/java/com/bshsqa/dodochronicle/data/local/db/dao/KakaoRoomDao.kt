@@ -15,6 +15,12 @@ interface KakaoRoomDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(room: KakaoRoomEntity)
 
+    @Query("SELECT * FROM kakao_rooms ORDER BY roomName ASC")
+    suspend fun getAll(): List<KakaoRoomEntity>
+
     @Query("UPDATE kakao_rooms SET lastImportedAt = :timestamp WHERE id = :id")
     suspend fun updateLastImported(id: String, timestamp: Long)
+
+    @Query("DELETE FROM kakao_rooms")
+    suspend fun deleteAll()
 }

@@ -6,10 +6,12 @@ import kotlinx.coroutines.flow.Flow
 
 interface KakaoRepository {
     fun observeRooms(): Flow<List<KakaoRoom>>
+    suspend fun getAllRooms(): List<KakaoRoom>
     suspend fun getRoomByName(name: String): KakaoRoom?
     suspend fun upsertRoom(room: KakaoRoom)
     suspend fun updateLastImported(roomId: String, timestamp: Long)
     suspend fun messageExistsByHash(hash: String): Boolean
     suspend fun insertMessages(messages: List<KakaoMessage>)
     suspend fun getLatestMessageSentAt(roomId: String): Long?
+    suspend fun deleteAll()
 }

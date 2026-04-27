@@ -16,4 +16,7 @@ interface KakaoMessageDao {
 
     @Query("SELECT MAX(sentAt) FROM kakao_messages WHERE roomId = :roomId")
     suspend fun getLatestSentAt(roomId: String): Long?
+
+    @Query("DELETE FROM kakao_messages")
+    suspend fun deleteAll()
 }

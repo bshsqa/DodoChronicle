@@ -13,5 +13,7 @@ data class Event(
     val content: String,
     val isFavorite: Boolean = false,
     val source: EventSource,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val longContent: String? = null,
+    val rawExcerpt: String? = null
 )

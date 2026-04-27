@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -60,6 +61,7 @@ fun TimelineScreen(
     var showResetDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
+    var kakaoImportAlias by remember { mutableStateOf("") }
 
     LaunchedEffect(state.needsInit) {
         if (state.needsInit) onNeedsInit()
@@ -68,7 +70,7 @@ fun TimelineScreen(
     val kakaoLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        uri?.let { viewModel.importKakao(it) }
+        uri?.let { viewModel.importKakao(it, kakaoImportAlias) }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -173,18 +175,13 @@ fun TimelineScreen(
     }
 
     if (showKakaoMenu) {
-        AlertDialog(
-            onDismissRequest = { showKakaoMenu = false },
-            icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
-            title = { Text("카카오톡 대화 import") },
-            text = { Text(".txt 파일을 선택하면 대화를 분석하여 이벤트를 추출합니다.") },
-            confirmButton = {
-                TextButton(onClick = { kakaoLauncher.launch("text/*"); showKakaoMenu = false }) {
-                    Text("파일 선택")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showKakaoMenu = false }) { Text("취소") }
+        KakaoImportDialog(
+            existingRooms = state.kakaoRooms,
+            onDismiss = { showKakaoMenu = false },
+            onSelectFile = { alias ->
+                kakaoImportAlias = alias
+                showKakaoMenu = false
+                kakaoLauncher.launch("text/*")
             }
         )
     }
@@ -754,8 +751,8 @@ private fun DailyDetailDialog(
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts  = events.filter { it.category != EventCategory.PHOTO }
 
-    // 다중 선택 상태 (eventId 기준)
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    var selectedTextEvent by remember { mutableStateOf<Event?>(null) }
     val isSelectMode = selectedIds.isNotEmpty()
 
     // 선택된 사진들의 PhotoRecord를 얻으려면 UI상에서 event.content(uri)로 대리
@@ -906,7 +903,7 @@ private fun DailyDetailDialog(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .combinedClickable(
-                                    onClick = {},
+                                    onClick = { selectedTextEvent = event },
                                     onLongClick = { showMenu = true }
                                 )
                                 .padding(vertical = 4.dp),
@@ -956,6 +953,170 @@ private fun DailyDetailDialog(
             if (!isSelectMode) {
                 TextButton(onClick = onDismiss) { Text("닫기") }
             }
+        }
+    )
+
+    selectedTextEvent?.let { event ->
+        EventDetailDialog(event = event, onDismiss = { selectedTextEvent = null })
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 카카오 import 다이얼로그 (방 별명 입력 + 기존 방 선택)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun KakaoImportDialog(
+    existingRooms: List<KakaoRoom>,
+    onDismiss: () -> Unit,
+    onSelectFile: (alias: String) -> Unit
+) {
+    var newAlias by remember { mutableStateOf("") }
+    var selectedRoomId by remember { mutableStateOf<String?>(null) }
+
+    val effectiveAlias = if (selectedRoomId != null)
+        existingRooms.find { it.id == selectedRoomId }?.roomName ?: ""
+    else newAlias
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
+        title = { Text("카카오톡 대화 import") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = newAlias,
+                    onValueChange = {
+                        newAlias = it
+                        if (it.isNotEmpty()) selectedRoomId = null
+                    },
+                    label = { Text("방 별명 (새 방)") },
+                    placeholder = { Text("예: 가족 단톡방") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = selectedRoomId == null,
+                    singleLine = true,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                )
+
+                if (existingRooms.isNotEmpty()) {
+                    Text(
+                        "또는 기존 방 선택:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        existingRooms.forEach { room ->
+                            FilterChip(
+                                selected = selectedRoomId == room.id,
+                                onClick = {
+                                    if (selectedRoomId == room.id) {
+                                        selectedRoomId = null
+                                    } else {
+                                        selectedRoomId = room.id
+                                        newAlias = ""
+                                    }
+                                },
+                                label = { Text(room.roomName) },
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = if (selectedRoomId == room.id) ({
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }) else null
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSelectFile(effectiveAlias) },
+                enabled = effectiveAlias.isNotBlank()
+            ) { Text("파일 선택") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 이벤트 상세 다이얼로그 (longContent + rawExcerpt)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
+    val categoryColor = categoryColor(event.category)
+    val categoryLabel = categoryLabel(event.category)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(categoryLabel, style = MaterialTheme.typography.labelSmall) },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = categoryColor.copy(alpha = 0.12f),
+                            labelColor = categoryColor
+                        ),
+                        border = BorderStroke(1.dp, categoryColor.copy(alpha = 0.3f))
+                    )
+                    Text(
+                        event.date.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(event.content, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!event.longContent.isNullOrBlank()) {
+                    item {
+                        Text(
+                            event.longContent,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                if (!event.rawExcerpt.isNullOrBlank()) {
+                    item {
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .fillMaxHeight()
+                                        .background(
+                                            MaterialTheme.colorScheme.primary,
+                                            androidx.compose.foundation.shape.RoundedCornerShape(2.dp)
+                                        )
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    event.rawExcerpt,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("닫기") }
         }
     )
 }

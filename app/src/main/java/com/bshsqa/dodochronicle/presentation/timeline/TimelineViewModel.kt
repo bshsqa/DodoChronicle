@@ -9,9 +9,11 @@ import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
+import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.domain.usecase.ImportKakaoUseCase
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
@@ -34,6 +36,7 @@ data class TimelineUiState(
     val filterCategory: EventCategory? = null,
     val onlyFavorite: Boolean = false,
     val pendingPhotos: List<SyncNewPhotosUseCase.PendingPhoto> = emptyList(),
+    val kakaoRooms: List<KakaoRoom> = emptyList(),
     val snackbar: String? = null,
     val isLoading: Boolean = false,
     val needsInit: Boolean = false
@@ -44,6 +47,7 @@ class TimelineViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
     private val eventRepository: EventRepository,
+    private val kakaoRepository: KakaoRepository,
     private val manageEventUseCase: ManageEventUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
     private val importKakaoUseCase: ImportKakaoUseCase,
@@ -69,6 +73,12 @@ class TimelineViewModel @Inject constructor(
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
 
             launch { syncNewPhotos() }
+
+            launch {
+                kakaoRepository.observeRooms().collect { rooms ->
+                    _state.update { it.copy(kakaoRooms = rooms) }
+                }
+            }
 
             combine(_filterCategory, _onlyFavorite) { cat, fav -> cat to fav }
                 .flatMapLatest { (cat, fav) ->
@@ -144,7 +154,6 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    /** 다중 선택 모드에서 사진 이벤트 일괄 삭제 */
     fun deletePhotoEventsBatch(eventIds: List<String>) {
         viewModelScope.launch {
             manageEventUseCase.deleteEventsBatch(eventIds)
@@ -153,7 +162,6 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    /** 선택된 사진들의 학습 제외 상태를 일괄 토글 */
     fun setExcludeFromModelBatch(photoRecords: List<PhotoRecord>, excluded: Boolean) {
         viewModelScope.launch {
             photoRecords.forEach { record ->
@@ -180,7 +188,7 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    fun importKakao(uri: Uri) {
+    fun importKakao(uri: Uri, roomAlias: String) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             val stream = context.contentResolver.openInputStream(uri)
@@ -188,10 +196,13 @@ class TimelineViewModel @Inject constructor(
                 _state.update { it.copy(snackbar = "파일을 열 수 없습니다", isLoading = false) }
                 return@launch
             }
-            val r = stream.use { importKakaoUseCase(it) }
+            val r = stream.use { importKakaoUseCase(it, roomAlias) }
             when (r) {
-                is ImportKakaoUseCase.Result.Success ->
-                    _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨") }
+                is ImportKakaoUseCase.Result.Success -> {
+                    val tokenStr = if (r.totalTokens > 0) ", 토큰 ${"%,d".format(r.totalTokens)}개" else ""
+                    val reqStr = if (r.apiRequests > 0) " (API ${r.apiRequests}회$tokenStr)" else ""
+                    _state.update { it.copy(snackbar = "메시지 ${r.addedMessages}개, 이벤트 ${r.addedEvents}개 추가됨$reqStr") }
+                }
                 is ImportKakaoUseCase.Result.Error ->
                     _state.update { it.copy(snackbar = r.message) }
             }
@@ -240,6 +251,7 @@ class TimelineViewModel @Inject constructor(
             }
             eventRepository.deleteAllPhotoRecords()
             childRepository.deleteAll()
+            kakaoRepository.deleteAll()
             dataStore.edit { it.clear() }
             _state.update { it.copy(needsInit = true) }
         }

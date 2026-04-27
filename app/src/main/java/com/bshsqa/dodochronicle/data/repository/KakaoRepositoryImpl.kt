@@ -21,6 +21,9 @@ class KakaoRepositoryImpl @Inject constructor(
     override fun observeRooms(): Flow<List<KakaoRoom>> =
         roomDao.observeAll().map { list -> list.map { KakaoRoom(it.id, it.roomName, it.lastImportedAt) } }
 
+    override suspend fun getAllRooms(): List<KakaoRoom> =
+        roomDao.getAll().map { KakaoRoom(it.id, it.roomName, it.lastImportedAt) }
+
     override suspend fun getRoomByName(name: String): KakaoRoom? =
         roomDao.getByName(name)?.let { KakaoRoom(it.id, it.roomName, it.lastImportedAt) }
 
@@ -40,4 +43,9 @@ class KakaoRepositoryImpl @Inject constructor(
 
     override suspend fun getLatestMessageSentAt(roomId: String): Long? =
         messageDao.getLatestSentAt(roomId)
+
+    override suspend fun deleteAll() {
+        messageDao.deleteAll()
+        roomDao.deleteAll()
+    }
 }

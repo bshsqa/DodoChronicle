@@ -59,7 +59,9 @@ class EventRepositoryImpl @Inject constructor(
         category = EventCategory.valueOf(category),
         content = content, isFavorite = isFavorite,
         source = EventSource.valueOf(source),
-        createdAt = createdAt
+        createdAt = createdAt,
+        longContent = longContent,
+        rawExcerpt = rawExcerpt
     )
 
     private fun Event.toEntity() = EventEntity(
@@ -67,7 +69,9 @@ class EventRepositoryImpl @Inject constructor(
         date = date.toEpochDay(),
         category = category.name,
         content = content, isFavorite = isFavorite,
-        source = source.name
+        source = source.name,
+        longContent = longContent,
+        rawExcerpt = rawExcerpt
     )
 
     private fun PhotoRecordEntity.toDomain() = PhotoRecord(

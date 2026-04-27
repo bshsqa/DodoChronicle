@@ -77,3 +77,6 @@ ehthumbs.db
 
 # kapt / KSP generated sources (covered by build/, but explicit)
 app/build/generated/
+
+# Kotlin compiler cache
+.kotlin/

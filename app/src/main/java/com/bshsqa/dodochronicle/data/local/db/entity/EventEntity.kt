@@ -23,5 +23,7 @@ data class EventEntity(
     val content: String,
     val isFavorite: Boolean = false,
     val source: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val longContent: String? = null,
+    val rawExcerpt: String? = null
 )
