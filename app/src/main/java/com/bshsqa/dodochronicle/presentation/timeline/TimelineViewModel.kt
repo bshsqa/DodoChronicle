@@ -154,6 +154,12 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun setFavoriteBatch(eventIds: List<String>, isFavorite: Boolean) {
+        viewModelScope.launch {
+            eventIds.forEach { manageEventUseCase.setFavorite(it, isFavorite) }
+        }
+    }
+
     fun deleteEvent(id: String) {
         viewModelScope.launch {
             manageEventUseCase.delete(id)

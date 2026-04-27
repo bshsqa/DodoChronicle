@@ -218,7 +218,7 @@ fun TimelineScreen(
                 viewModel.setExcludeFromModelBatch(records, excluded)
             },
             onToggleFavorite = viewModel::toggleFavorite,
-            onDelete = { id -> viewModel.deleteEvent(id) }
+            onSetFavoriteBatch = { ids, fav -> viewModel.setFavoriteBatch(ids, fav) }
         )
     }
 
@@ -804,7 +804,7 @@ private fun DailyDetailDialog(
     onDeleteBatch: (List<String>) -> Unit,
     onExcludeBatch: (List<PhotoRecord>, Boolean) -> Unit,
     onToggleFavorite: (Event) -> Unit,
-    onDelete: (String) -> Unit
+    onSetFavoriteBatch: (List<String>, Boolean) -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts  = events.filter { it.category != EventCategory.PHOTO }
@@ -836,6 +836,20 @@ private fun DailyDetailDialog(
                     }
                     Text("${selectedIds.size}개 선택됨", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.weight(1f))
+                    // 즐겨찾기 토글 (전체 즐겨찾기면 해제, 하나라도 아니면 추가)
+                    val allFavorited = selectedPhotoEvents.all { it.isFavorite }
+                    IconButton(
+                        onClick = {
+                            onSetFavoriteBatch(selectedIds.toList(), !allFavorited)
+                            selectedIds = setOf()
+                        }
+                    ) {
+                        Icon(
+                            if (allFavorited) Icons.Default.StarBorder else Icons.Default.Star,
+                            contentDescription = if (allFavorited) "즐겨찾기 해제" else "즐겨찾기",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     // 학습 제외 토글 (혼합 상태면 비활성화)
                     IconButton(
                         onClick = {
@@ -993,14 +1007,6 @@ private fun DailyDetailDialog(
                                          else Icons.Default.Star, null)
                                 },
                                 onClick = { onToggleFavorite(event); showMenu = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("삭제", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Delete, null,
-                                        tint = MaterialTheme.colorScheme.error)
-                                },
-                                onClick = { onDelete(event.id); showMenu = false }
                             )
                         }
                     }
