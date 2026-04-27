@@ -1,15 +1,13 @@
 package com.bshsqa.dodochronicle.presentation.init
 
 import android.content.Context
-import android.net.Uri
-import android.provider.MediaStore
+import android.content.Intent
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.Child
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
@@ -19,22 +17,19 @@ import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
-import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
-import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
 import com.bshsqa.dodochronicle.ml.PhotoEmbedding
+import com.bshsqa.dodochronicle.service.ScanForegroundService
+import com.bshsqa.dodochronicle.service.ScanState
+import com.bshsqa.dodochronicle.service.ScanStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -71,9 +66,8 @@ class InitViewModel @Inject constructor(
     private val childRepository: ChildRepository,
     private val eventRepository: EventRepository,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
-    private val faceDetector: FaceDetectorHelper,
     private val faceEmbedder: FaceEmbedder,
-    private val clusteringEngine: FaceClusteringEngine,
+    private val stateHolder: ScanStateHolder,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -82,7 +76,44 @@ class InitViewModel @Inject constructor(
 
     // clusterID → 해당 클러스터에 속하는 PhotoEmbedding 목록
     private var _rawClusterPhotos: Map<Int, List<PhotoEmbedding>> = emptyMap()
-    private var scanJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            stateHolder.state.collect { scanState ->
+                when (scanState) {
+                    is ScanState.Running -> _uiState.update {
+                        // 서비스가 실행 중임을 보장: 화면 회전 등 ViewModel 재생성 시에도 Scanning 단계 복원
+                        it.copy(
+                            step = InitStep.Scanning,
+                            scannedCount = scanState.processed,
+                            totalCount = scanState.total
+                        )
+                    }
+                    is ScanState.Done -> handleDone(scanState)
+                    is ScanState.Failed -> {
+                        stateHolder.reset()
+                        _uiState.update {
+                            it.copy(step = InitStep.ChildInfo, error = scanState.message)
+                        }
+                    }
+                    else -> Unit // Idle, Cancelled — UI 별도 조작 불필요
+                }
+            }
+        }
+    }
+
+    private fun handleDone(done: ScanState.Done) {
+        _rawClusterPhotos = done.clusters.associate { cluster ->
+            cluster.id to done.embeddings.filter { pe ->
+                cluster.representativeUris.contains(pe.uri) ||
+                    cluster.embeddings.any { it.contentEquals(pe.embedding) }
+            }
+        }
+        val clusterUi = done.clusters.map { c ->
+            ClusterUiModel(c.id, c.representativeUris, c.embeddings.size)
+        }
+        _uiState.update { it.copy(step = InitStep.ClusterSelect, clusters = clusterUi) }
+    }
 
     fun setChildName(name: String) = _uiState.update { it.copy(childName = name) }
     fun setBirthDate(date: LocalDate) = _uiState.update { it.copy(birthDate = date) }
@@ -104,12 +135,20 @@ class InitViewModel @Inject constructor(
             return
         }
         _uiState.update { it.copy(step = InitStep.Scanning, error = null) }
-        scanJob = viewModelScope.launch(Dispatchers.IO) { performScan() }
+        context.startForegroundService(
+            Intent(context, ScanForegroundService::class.java).apply {
+                action = ScanForegroundService.ACTION_START
+            }
+        )
     }
 
     fun cancelScanning() {
-        scanJob?.cancel()
-        scanJob = null
+        context.startService(
+            Intent(context, ScanForegroundService::class.java).apply {
+                action = ScanForegroundService.ACTION_CANCEL
+            }
+        )
+        stateHolder.reset()
         _rawClusterPhotos = emptyMap()
         _uiState.update { state ->
             state.copy(
@@ -121,46 +160,6 @@ class InitViewModel @Inject constructor(
                 error = null
             )
         }
-    }
-
-    private suspend fun performScan() {
-        val photoUris = queryPhotos()
-        val total = photoUris.size
-        _uiState.update { it.copy(totalCount = total) }
-
-        val embeddings = mutableListOf<PhotoEmbedding>()
-        var processed = 0
-
-        for ((uri, takenAt) in photoUris) {
-            currentCoroutineContext().ensureActive()
-            val bmp = loadBitmap(uri)
-            if (bmp != null) {
-                val faces = faceDetector.detectFaces(bmp)
-                if (faces.isNotEmpty()) {
-                    val emb = faceEmbedder.embed(bmp, faces.first())
-                    if (emb != null) embeddings.add(PhotoEmbedding(uri, takenAt, emb))
-                }
-            }
-            processed++
-            _uiState.update { it.copy(scannedCount = processed) }
-        }
-
-        val clusters = clusteringEngine.cluster(embeddings)
-        if (clusters.isEmpty()) {
-            _uiState.update { it.copy(step = InitStep.ChildInfo, error = "아이 얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요") }
-            return
-        }
-        // clusterID → PhotoEmbedding 목록으로 역매핑 저장
-        _rawClusterPhotos = clusters.associate { cluster ->
-            cluster.id to embeddings.filter { pe ->
-                cluster.representativeUris.contains(pe.uri) ||
-                    cluster.embeddings.any { it.contentEquals(pe.embedding) }
-            }
-        }
-        val clusterUi = clusters.map { c ->
-            ClusterUiModel(c.id, c.representativeUris, c.embeddings.size)
-        }
-        _uiState.update { it.copy(step = InitStep.ClusterSelect, clusters = clusterUi) }
     }
 
     fun toggleCluster(id: Int) {
@@ -228,45 +227,12 @@ class InitViewModel @Inject constructor(
             // 3. 최신 50장 기준으로 기준 임베딩 벡터 갱신
             updateEmbeddingUseCase(child.id)
 
+            // 4. ScanStateHolder 초기화 후 완료 처리
+            stateHolder.reset()
             dataStore.edit { prefs -> prefs[KEY_INITIALIZED] = true }
             _uiState.update { it.copy(step = InitStep.Done) }
         }
     }
 
     fun dismissError() = _uiState.update { it.copy(error = null) }
-
-    private fun queryPhotos(): List<Pair<String, Long>> {
-        val uris = mutableListOf<Pair<String, Long>>()
-        val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_TAKEN
-        )
-        val sortOrder = "${MediaStore.Images.Media.DATE_TAKEN} DESC"
-        val limit = BuildConfig.PHOTO_SCAN_LIMIT
-
-        context.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection, null, null, sortOrder
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
-            var count = 0
-            while (cursor.moveToNext() && (limit < 0 || count < limit)) {
-                val id = cursor.getLong(idCol)
-                val takenAt = cursor.getLong(dateCol)
-                val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                uris.add(uri.toString() to takenAt)
-                count++
-            }
-        }
-        return uris
-    }
-
-    private suspend fun loadBitmap(uri: String) = withContext(Dispatchers.IO) {
-        try {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-                android.graphics.BitmapFactory.decodeStream(it)
-            }
-        } catch (e: Exception) { null }
-    }
 }
