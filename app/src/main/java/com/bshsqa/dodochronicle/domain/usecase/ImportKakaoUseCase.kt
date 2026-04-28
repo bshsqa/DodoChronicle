@@ -2,6 +2,7 @@ package com.bshsqa.dodochronicle.domain.usecase
 
 import android.util.Log
 import com.bshsqa.dodochronicle.ai.ChunkProgress
+import com.bshsqa.dodochronicle.ai.ExtractedEvent
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventSource
@@ -110,17 +111,40 @@ class ImportKakaoUseCase @Inject constructor(
 
                 val chunkMessages = newMessages.filter { it.sentAt > lastSavedSentAt && it.sentAt <= chunkEndTime }
 
-                try {
-                    val (events, tokens) = geminiClassifier.processChunk(
-                        chunk, child.name, child.birthDate, child.gender
-                    )
+                var attempt = 0
+                var apiEvents = emptyList<ExtractedEvent>()
+                var apiTokens = 0
+                var apiSucceeded = false
 
-                    kakaoRepository.insertMessages(chunkMessages)
-                    kakaoRepository.updateLastImported(room.id, chunkEndTime)
-                    lastSavedSentAt = chunkEndTime
-                    totalAddedMessages += chunkMessages.size
+                while (attempt < 3 && !apiSucceeded) {
+                    if (attempt > 0) {
+                        if (isCancelled?.invoke() == true) break
+                        delay(12000L)
+                    }
+                    try {
+                        val (events, tokens) = geminiClassifier.processChunk(
+                            chunk, child.name, child.birthDate, child.gender
+                        )
+                        apiEvents = events
+                        apiTokens = tokens
+                        if (tokens > 0 || events.isNotEmpty()) {
+                            apiSucceeded = true
+                        } else {
+                            attempt++
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ImportKakao", "Chunk $index attempt $attempt failed: ${e.message}", e)
+                        attempt++
+                    }
+                }
 
-                    val eventList = events.map { extracted ->
+                kakaoRepository.insertMessages(chunkMessages)
+                kakaoRepository.updateLastImported(room.id, chunkEndTime)
+                lastSavedSentAt = chunkEndTime
+                totalAddedMessages += chunkMessages.size
+
+                if (apiSucceeded) {
+                    val eventList = apiEvents.map { extracted ->
                         Event(
                             id = UUID.randomUUID().toString(),
                             childId = child.id,
@@ -134,31 +158,10 @@ class ImportKakaoUseCase @Inject constructor(
                     }
                     if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)
                     totalAddedEvents += eventList.size
-
-                    if (tokens > 0 || events.isNotEmpty()) {
-                        totalRequests++
-                    } else {
-                        // soft failure: API returned empty response
-                        failedChunks++
-                        retryChunkRepository.save(listOf(RetryChunk(
-                            id = UUID.randomUUID().toString(),
-                            roomId = room.id,
-                            roomAlias = roomAlias,
-                            sentAtStart = chunk.first().sentAt,
-                            sentAtEnd = chunk.last().sentAt,
-                            dateRange = dateRangeStr
-                        )))
-                    }
-                    totalTokens += tokens
-
-                } catch (e: Exception) {
-                    Log.e("ImportKakao", "Chunk $index failed: ${e.message}", e)
+                    totalRequests++
+                    totalTokens += apiTokens
+                } else {
                     failedChunks++
-                    kakaoRepository.insertMessages(chunkMessages)
-                    kakaoRepository.updateLastImported(room.id, chunkEndTime)
-                    lastSavedSentAt = chunkEndTime
-                    totalAddedMessages += chunkMessages.size
-                    // save for later retry
                     retryChunkRepository.save(listOf(RetryChunk(
                         id = UUID.randomUUID().toString(),
                         roomId = room.id,
