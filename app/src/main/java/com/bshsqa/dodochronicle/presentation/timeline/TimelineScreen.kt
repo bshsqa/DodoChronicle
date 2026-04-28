@@ -24,7 +24,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +68,8 @@ fun TimelineScreen(
     var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
+    var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
+    var fullscreenIndex by remember { mutableStateOf(0) }
     var kakaoImportAlias by remember { mutableStateOf("") }
 
     LaunchedEffect(state.needsInit) {
@@ -141,6 +148,10 @@ fun TimelineScreen(
                         events = state.events,
                         birthDate = state.birthDate,
                         onDayClick = { date -> selectedDetailDate = date },
+                        onPhotoClick = { photos, index ->
+                            fullscreenPhotos = photos
+                            fullscreenIndex = index
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -235,7 +246,20 @@ fun TimelineScreen(
                 viewModel.setExcludeFromModelBatch(records, excluded)
             },
             onToggleFavorite = viewModel::toggleFavorite,
-            onSetFavoriteBatch = { ids, fav -> viewModel.setFavoriteBatch(ids, fav) }
+            onSetFavoriteBatch = { ids, fav -> viewModel.setFavoriteBatch(ids, fav) },
+            onPhotoClick = { photos, index ->
+                fullscreenPhotos = photos
+                fullscreenIndex = index
+            }
+        )
+    }
+
+    val currentFullscreenPhotos = fullscreenPhotos
+    if (currentFullscreenPhotos != null) {
+        FullscreenPhotoViewer(
+            photos = currentFullscreenPhotos,
+            initialIndex = fullscreenIndex,
+            onDismiss = { fullscreenPhotos = null }
         )
     }
 
@@ -268,6 +292,11 @@ fun TimelineScreen(
                 showSettingsMenu = false
                 showRetryRoomDialog = true
             },
+            onScan = {
+                showSettingsMenu = false
+                viewModel.startManualScan()
+            },
+            isScanRunning = state.isScanRunning,
             onReset = {
                 showSettingsMenu = false
                 showResetConfirm = true
@@ -730,6 +759,7 @@ private fun GroupedTimelineContent(
     events: List<Event>,
     birthDate: LocalDate?,
     onDayClick: (LocalDate) -> Unit,
+    onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
@@ -741,10 +771,12 @@ private fun GroupedTimelineContent(
     ) {
         items(grouped.keys.toList(), key = { it.toString() }) { date ->
             val dayEvents = grouped[date] ?: emptyList()
+            val dayPhotos = dayEvents.filter { it.category == EventCategory.PHOTO }.map { it.content }
             DailyEventCard(
                 date = date,
                 events = dayEvents,
-                onClick = { onDayClick(date) }
+                onClick = { onDayClick(date) },
+                onPhotoClick = { index -> onPhotoClick(dayPhotos, index) }
             )
         }
     }
@@ -754,7 +786,8 @@ private fun GroupedTimelineContent(
 private fun DailyEventCard(
     date: LocalDate,
     events: List<Event>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onPhotoClick: (index: Int) -> Unit = {}
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts = events.filter { it.category != EventCategory.PHOTO }
@@ -792,7 +825,7 @@ private fun DailyEventCard(
             if (photos.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     photos.take(4).forEachIndexed { idx, event ->
-                        Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                        Box(modifier = Modifier.weight(1f).aspectRatio(1f).clickable { onPhotoClick(idx) }) {
                             AsyncImage(
                                 model = event.content,
                                 contentDescription = null,
@@ -859,7 +892,8 @@ private fun DailyDetailDialog(
     onDeleteBatch: (List<String>) -> Unit,
     onExcludeBatch: (List<PhotoRecord>, Boolean) -> Unit,
     onToggleFavorite: (Event) -> Unit,
-    onSetFavoriteBatch: (List<String>, Boolean) -> Unit
+    onSetFavoriteBatch: (List<String>, Boolean) -> Unit,
+    onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> }
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts  = events.filter { it.category != EventCategory.PHOTO }
@@ -969,6 +1003,11 @@ private fun DailyDetailDialog(
                                                     selectedIds = if (isSelected)
                                                         selectedIds - event.id
                                                     else selectedIds + event.id
+                                                } else {
+                                                    onPhotoClick(
+                                                        photos.map { it.content },
+                                                        photos.indexOf(event).coerceAtLeast(0)
+                                                    )
                                                 }
                                             },
                                             onLongClick = {
@@ -1272,6 +1311,8 @@ private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit, onRet
 private fun SettingsMenuDialog(
     pendingRetryCount: Int,
     onRetry: () -> Unit,
+    onScan: () -> Unit,
+    isScanRunning: Boolean,
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1295,6 +1336,22 @@ private fun SettingsMenuDialog(
                     }
                     HorizontalDivider()
                 }
+                TextButton(
+                    onClick = onScan,
+                    enabled = !isScanRunning,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isScanRunning) "사진 분석 중..." else "신규 사진 로딩",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                HorizontalDivider()
                 TextButton(
                     onClick = onReset,
                     modifier = Modifier.fillMaxWidth(),
@@ -1471,4 +1528,65 @@ private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("닫기") }
         }
     )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 사진 전체화면 뷰어
+// ──────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FullscreenPhotoViewer(
+    photos: List<String>,
+    initialIndex: Int,
+    onDismiss: () -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                AsyncImage(
+                    model = photos[page],
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            }
+
+            // 닫기 버튼 (좌상단)
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "닫기",
+                    tint = Color.White
+                )
+            }
+
+            // 인덱스 표시 (우상단)
+            Text(
+                text = "${pagerState.currentPage + 1} / ${photos.size}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            )
+        }
+    }
 }
