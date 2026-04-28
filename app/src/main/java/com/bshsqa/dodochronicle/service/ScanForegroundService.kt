@@ -86,7 +86,7 @@ class ScanForegroundService : Service() {
     private fun cancelScan() {
         scanJob?.cancel()
         stateHolder.emit(ScanState.Cancelled)
-        // WakeLock 해제 및 서비스 종료는 finally → stopSelf() → onDestroy() 에서 처리
+        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
     override fun onDestroy() {
@@ -133,6 +133,7 @@ class ScanForegroundService : Service() {
         val clusters = clusteringEngine.cluster(embeddings)
         if (clusters.isEmpty()) {
             stateHolder.emit(ScanState.Failed("아이 얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요"))
+            androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         } else {
             stateHolder.emit(ScanState.Done(clusters, embeddings.toList()))
             showCompletedNotification()
@@ -218,8 +219,12 @@ class ScanForegroundService : Service() {
             .setAutoCancel(true)
             .setContentIntent(mainActivityPendingIntent())
             .build()
-        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_DETACH)
+        // notify() 를 먼저 호출해 포그라운드 서비스 권한으로 알림 내용을 교체한 뒤,
+        // stopForeground(DETACH) 로 분리하여 완료 알림이 상태바에 남도록 한다.
+        // (순서가 반대이면 DETACH 이후 notify() 에 POST_NOTIFICATIONS 권한이 필요해져
+        //  Android 13+ 에서 묵인 실패 시 진행률 알림이 그대로 남는 문제가 발생한다.)
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, notification)
+        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_DETACH)
     }
 }
