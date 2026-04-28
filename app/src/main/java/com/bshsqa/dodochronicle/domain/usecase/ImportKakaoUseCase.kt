@@ -6,9 +6,11 @@ import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
+import com.bshsqa.dodochronicle.domain.model.RetryChunk
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
+import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.kakao.KakaoParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -22,7 +24,8 @@ class ImportKakaoUseCase @Inject constructor(
     private val kakaoRepository: KakaoRepository,
     private val eventRepository: EventRepository,
     private val childRepository: ChildRepository,
-    private val geminiClassifier: GeminiEventClassifier
+    private val geminiClassifier: GeminiEventClassifier,
+    private val retryChunkRepository: RetryChunkRepository
 ) {
     sealed class Result {
         data class Success(
@@ -90,14 +93,14 @@ class ImportKakaoUseCase @Inject constructor(
                     break
                 }
 
-                // rate limit 대기 — 이 동안 이전 청크 progress가 화면에 유지됨
                 if (index > 0) delay(12000L)
 
                 val chunkDates = chunk.map {
                     java.time.Instant.ofEpochMilli(it.sentAt)
                         .atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate()
                 }
-                onProgress?.invoke(ChunkProgress(index, chunks.size, "${chunkDates.first()} ~ ${chunkDates.last()}"))
+                val dateRangeStr = "${chunkDates.first()} ~ ${chunkDates.last()}"
+                onProgress?.invoke(ChunkProgress(index, chunks.size, dateRangeStr))
 
                 val chunkEndTime = if (index < chunks.size - 1) {
                     chunks[index + 1].first().sentAt - 1L
@@ -132,8 +135,20 @@ class ImportKakaoUseCase @Inject constructor(
                     if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)
                     totalAddedEvents += eventList.size
 
-                    if (tokens > 0 || events.isNotEmpty()) totalRequests++
-                    else failedChunks++
+                    if (tokens > 0 || events.isNotEmpty()) {
+                        totalRequests++
+                    } else {
+                        // soft failure: API returned empty response
+                        failedChunks++
+                        retryChunkRepository.save(listOf(RetryChunk(
+                            id = UUID.randomUUID().toString(),
+                            roomId = room.id,
+                            roomAlias = roomAlias,
+                            sentAtStart = chunk.first().sentAt,
+                            sentAtEnd = chunk.last().sentAt,
+                            dateRange = dateRangeStr
+                        )))
+                    }
                     totalTokens += tokens
 
                 } catch (e: Exception) {
@@ -143,6 +158,15 @@ class ImportKakaoUseCase @Inject constructor(
                     kakaoRepository.updateLastImported(room.id, chunkEndTime)
                     lastSavedSentAt = chunkEndTime
                     totalAddedMessages += chunkMessages.size
+                    // save for later retry
+                    retryChunkRepository.save(listOf(RetryChunk(
+                        id = UUID.randomUUID().toString(),
+                        roomId = room.id,
+                        roomAlias = roomAlias,
+                        sentAtStart = chunk.first().sentAt,
+                        sentAtEnd = chunk.last().sentAt,
+                        dateRange = dateRangeStr
+                    )))
                 }
             }
 

@@ -20,6 +20,9 @@ interface KakaoMessageDao {
     @Query("SELECT MAX(sentAt) FROM kakao_messages WHERE roomId = :roomId")
     suspend fun getLatestSentAt(roomId: String): Long?
 
+    @Query("SELECT * FROM kakao_messages WHERE roomId = :roomId AND sentAt >= :start AND sentAt <= :end ORDER BY sentAt ASC")
+    suspend fun getInRange(roomId: String, start: Long, end: Long): List<KakaoMessageEntity>
+
     @Query("DELETE FROM kakao_messages")
     suspend fun deleteAll()
 }

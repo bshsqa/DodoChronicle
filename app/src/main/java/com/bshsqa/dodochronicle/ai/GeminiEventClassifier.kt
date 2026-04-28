@@ -200,7 +200,7 @@ class GeminiEventClassifier @Inject constructor(
 - date는 해당 메시지의 날짜를 사용합니다 (YYYY-MM-DD)
 - content: 아이 관점에서 한 줄 요약 (예: "처음으로 뒤집기 성공")
 - longContent: 더 자세한 설명 (2~3문장, 맥락 포함)
-- rawExcerpt: 해당 이벤트와 관련된 원본 대화 3~7줄 발췌
+- rawExcerpt: 해당 이벤트와 직접 관련된 원본 대화 5~10줄 발췌. 이벤트와 무관한 대화는 포함하지 않음.
 
 대화 내용:
 $messages

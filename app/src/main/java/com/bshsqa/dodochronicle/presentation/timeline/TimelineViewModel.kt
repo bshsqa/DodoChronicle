@@ -15,7 +15,9 @@ import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
+import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
+import com.bshsqa.dodochronicle.domain.usecase.RetryFailedChunksUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import com.bshsqa.dodochronicle.service.ImportState
@@ -48,6 +50,12 @@ data class ImportDoneInfo(
     val cancelled: Boolean
 )
 
+data class RetryRoomInfo(
+    val roomId: String,
+    val roomAlias: String,
+    val chunkCount: Int
+)
+
 data class TimelineUiState(
     val childName: String = "",
     val birthDate: LocalDate? = null,
@@ -60,7 +68,8 @@ data class TimelineUiState(
     val isLoading: Boolean = false,
     val importProgress: ImportProgress? = null,
     val importDone: ImportDoneInfo? = null,
-    val needsInit: Boolean = false
+    val needsInit: Boolean = false,
+    val pendingRetryRooms: List<RetryRoomInfo> = emptyList()
 )
 
 @HiltViewModel
@@ -73,6 +82,8 @@ class TimelineViewModel @Inject constructor(
     private val syncUseCase: SyncNewPhotosUseCase,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val importStateHolder: ImportStateHolder,
+    private val retryChunkRepository: RetryChunkRepository,
+    private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -82,6 +93,10 @@ class TimelineViewModel @Inject constructor(
     private val _filterCategory = MutableStateFlow<EventCategory?>(null)
     private val _onlyFavorite = MutableStateFlow(false)
     private var childId: String = ""
+
+    // roomId of the most recently imported room, kept for immediate retry from ImportDoneOverlay
+    private var lastImportRoomId: String? = null
+    private var lastImportAlias: String = ""
 
     init {
         viewModelScope.launch {
@@ -102,6 +117,17 @@ class TimelineViewModel @Inject constructor(
             }
 
             launch {
+                retryChunkRepository.observeAll().collect { chunks ->
+                    val grouped = chunks.groupBy { it.roomId }
+                    _state.update { s ->
+                        s.copy(pendingRetryRooms = grouped.map { (roomId, roomChunks) ->
+                            RetryRoomInfo(roomId, roomChunks.first().roomAlias, roomChunks.size)
+                        })
+                    }
+                }
+            }
+
+            launch {
                 importStateHolder.state.collect { importState ->
                     when (importState) {
                         is ImportState.Idle -> _state.update {
@@ -115,6 +141,13 @@ class TimelineViewModel @Inject constructor(
                             )
                         }
                         is ImportState.Done -> {
+                            // resolve roomId for immediate retry if there are failed chunks
+                            if (importState.failedChunks > 0 && lastImportAlias.isNotBlank()) {
+                                launch {
+                                    val room = kakaoRepository.getRoomByName(lastImportAlias)
+                                    lastImportRoomId = room?.id
+                                }
+                            }
                             importStateHolder.reset()
                             _state.update {
                                 it.copy(
@@ -257,6 +290,8 @@ class TimelineViewModel @Inject constructor(
     }
 
     fun importKakao(uri: Uri, roomAlias: String) {
+        lastImportAlias = roomAlias
+        lastImportRoomId = null
         _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
         context.startForegroundService(
             Intent(context, KakaoImportService::class.java).apply {
@@ -278,6 +313,55 @@ class TimelineViewModel @Inject constructor(
     fun dismissImportResult() {
         importStateHolder.reset()
         _state.update { it.copy(importDone = null) }
+    }
+
+    /** ImportDoneOverlay의 즉시 재시도 버튼에서 호출 */
+    fun retryImmediate() {
+        val roomId = lastImportRoomId ?: return
+        retryRoom(roomId)
+    }
+
+    /** 설정 메뉴의 재시도 방 선택 후 호출 */
+    fun retryRoom(roomId: String) {
+        _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
+        viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            val result = retryFailedChunksUseCase(
+                roomId = roomId,
+                onProgress = { progress ->
+                    _state.update { s ->
+                        s.copy(importProgress = ImportProgress(
+                            chunksDone = progress.chunkIndex,
+                            totalChunks = progress.totalChunks,
+                            dateRange = progress.dateRange
+                        ))
+                    }
+                }
+            )
+            val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
+
+            if (result.remainingFailedChunks > 0) {
+                lastImportRoomId = roomId
+            } else {
+                lastImportRoomId = null
+            }
+
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    importProgress = null,
+                    importDone = ImportDoneInfo(
+                        addedMessages = 0,
+                        addedEvents = result.addedEvents,
+                        apiRequests = result.apiRequests,
+                        totalTokens = result.totalTokens,
+                        failedChunks = result.remainingFailedChunks,
+                        elapsedSeconds = elapsedSeconds,
+                        cancelled = false
+                    )
+                )
+            }
+        }
     }
 
     fun confirmPendingPhoto(pending: SyncNewPhotosUseCase.PendingPhoto, accept: Boolean) {
@@ -322,6 +406,7 @@ class TimelineViewModel @Inject constructor(
             eventRepository.deleteAllPhotoRecords()
             childRepository.deleteAll()
             kakaoRepository.deleteAll()
+            retryChunkRepository.deleteAll()
             dataStore.edit { it.clear() }
             _state.update { it.copy(needsInit = true) }
         }

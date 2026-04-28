@@ -18,7 +18,12 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): DodoDatabase =
         Room.databaseBuilder(context, DodoDatabase::class.java, "dodo.db")
-            .addMigrations(DodoDatabase.MIGRATION_1_2, DodoDatabase.MIGRATION_2_3, DodoDatabase.MIGRATION_3_4)
+            .addMigrations(
+                DodoDatabase.MIGRATION_1_2,
+                DodoDatabase.MIGRATION_2_3,
+                DodoDatabase.MIGRATION_3_4,
+                DodoDatabase.MIGRATION_4_5
+            )
             .fallbackToDestructiveMigration()
             .build()
 
@@ -27,4 +32,5 @@ object DatabaseModule {
     @Provides fun providePhotoRecordDao(db: DodoDatabase) = db.photoRecordDao()
     @Provides fun provideKakaoRoomDao(db: DodoDatabase) = db.kakaoRoomDao()
     @Provides fun provideKakaoMessageDao(db: DodoDatabase) = db.kakaoMessageDao()
+    @Provides fun provideRetryChunkDao(db: DodoDatabase) = db.retryChunkDao()
 }

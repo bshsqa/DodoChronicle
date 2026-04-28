@@ -13,9 +13,10 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         EventEntity::class,
         PhotoRecordEntity::class,
         KakaoRoomEntity::class,
-        KakaoMessageEntity::class
+        KakaoMessageEntity::class,
+        RetryChunkEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -24,6 +25,7 @@ abstract class DodoDatabase : RoomDatabase() {
     abstract fun photoRecordDao(): PhotoRecordDao
     abstract fun kakaoRoomDao(): KakaoRoomDao
     abstract fun kakaoMessageDao(): KakaoMessageDao
+    abstract fun retryChunkDao(): RetryChunkDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -44,6 +46,23 @@ abstract class DodoDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE events ADD COLUMN longContent TEXT")
                 database.execSQL("ALTER TABLE events ADD COLUMN rawExcerpt TEXT")
+            }
+        }
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS retry_chunks (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        roomId TEXT NOT NULL,
+                        roomAlias TEXT NOT NULL,
+                        sentAtStart INTEGER NOT NULL,
+                        sentAtEnd INTEGER NOT NULL,
+                        dateRange TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }

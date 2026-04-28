@@ -47,6 +47,11 @@ class KakaoRepositoryImpl @Inject constructor(
     override suspend fun getLatestMessageSentAt(roomId: String): Long? =
         messageDao.getLatestSentAt(roomId)
 
+    override suspend fun getMessagesInRange(roomId: String, start: Long, end: Long): List<KakaoMessage> =
+        messageDao.getInRange(roomId, start, end).map {
+            KakaoMessage(it.id, it.roomId, it.sender, it.sentAt, it.content, it.contentHash)
+        }
+
     override suspend fun deleteAll() {
         messageDao.deleteAll()
         roomDao.deleteAll()

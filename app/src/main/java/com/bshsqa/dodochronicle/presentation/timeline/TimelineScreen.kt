@@ -58,7 +58,9 @@ fun TimelineScreen(
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showKakaoMenu by remember { mutableStateOf(false) }
-    var showResetDialog by remember { mutableStateOf(false) }
+    var showSettingsMenu by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var kakaoImportAlias by remember { mutableStateOf("") }
@@ -98,7 +100,7 @@ fun TimelineScreen(
                             else MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    IconButton(onClick = { showResetDialog = true }) {
+                    IconButton(onClick = { showSettingsMenu = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "설정")
                     }
                 },
@@ -208,7 +210,11 @@ fun TimelineScreen(
 
             val importDone = state.importDone
             if (importDone != null) {
-                ImportDoneOverlay(info = importDone, onConfirm = viewModel::dismissImportResult)
+                ImportDoneOverlay(
+                    info = importDone,
+                    onConfirm = viewModel::dismissImportResult,
+                    onRetry = if (importDone.failedChunks > 0) viewModel::retryImmediate else null
+                )
             }
         }
     }
@@ -255,16 +261,31 @@ fun TimelineScreen(
         )
     }
 
-    if (showResetDialog) {
+    if (showSettingsMenu) {
+        SettingsMenuDialog(
+            pendingRetryCount = state.pendingRetryRooms.sumOf { it.chunkCount },
+            onRetry = {
+                showSettingsMenu = false
+                showRetryRoomDialog = true
+            },
+            onReset = {
+                showSettingsMenu = false
+                showResetConfirm = true
+            },
+            onDismiss = { showSettingsMenu = false }
+        )
+    }
+
+    if (showResetConfirm) {
         AlertDialog(
-            onDismissRequest = { showResetDialog = false },
+            onDismissRequest = { showResetConfirm = false },
             icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("앱 데이터 초기화") },
             text = { Text("앱 데이터를 초기화합니다.\n갤러리 사진은 변경되지 않습니다.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showResetDialog = false
+                        showResetConfirm = false
                         viewModel.resetApp()
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
@@ -273,7 +294,18 @@ fun TimelineScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) { Text("취소") }
+                TextButton(onClick = { showResetConfirm = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showRetryRoomDialog) {
+        RetryRoomDialog(
+            rooms = state.pendingRetryRooms,
+            onDismiss = { showRetryRoomDialog = false },
+            onRetry = { roomId ->
+                showRetryRoomDialog = false
+                viewModel.retryRoom(roomId)
             }
         )
     }
@@ -735,13 +767,25 @@ private fun DailyEventCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // 날짜 헤더
-            Text(
-                dateLabel,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            // 날짜 헤더 + 카테고리 pill 뱃지
+            val presentCategories = listOf(
+                EventCategory.PHOTO, EventCategory.DID, EventCategory.SAID, EventCategory.OTHER
+            ).filter { cat -> events.any { it.category == cat } }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    dateLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    presentCategories.forEach { cat -> CategoryPill(cat) }
+                }
+            }
             Spacer(Modifier.height(8.dp))
 
             // 사진 미리보기 (최대 4장)
@@ -1119,7 +1163,7 @@ private fun KakaoImportDialog(
 // ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit) {
+private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit, onRetry: (() -> Unit)? = null) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1196,10 +1240,154 @@ private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit) {
             }
 
             Spacer(Modifier.height(8.dp))
+            if (onRetry != null) {
+                OutlinedButton(
+                    onClick = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("실패한 청크 ${info.failedChunks}개 재시도")
+                }
+            }
             Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
                 Text("확인")
             }
         }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 설정 선택 메뉴
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsMenuDialog(
+    pendingRetryCount: Int,
+    onRetry: () -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+        title = { Text("설정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (pendingRetryCount > 0) {
+                    TextButton(
+                        onClick = onRetry,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("대화 분석 재시도 (${pendingRetryCount}건)", modifier = Modifier.weight(1f))
+                    }
+                    HorizontalDivider()
+                }
+                TextButton(
+                    onClick = onReset,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("앱 데이터 초기화", modifier = Modifier.weight(1f))
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 재시도 대화방 선택 다이얼로그
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RetryRoomDialog(
+    rooms: List<RetryRoomInfo>,
+    onDismiss: () -> Unit,
+    onRetry: (roomId: String) -> Unit
+) {
+    var selectedRoomId by remember { mutableStateOf(rooms.firstOrNull()?.roomId) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+        title = { Text("재시도할 대화방 선택") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                rooms.forEach { room ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedRoomId = room.roomId }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedRoomId == room.roomId,
+                            onClick = { selectedRoomId = room.roomId }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(room.roomAlias, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "청크 ${room.chunkCount}개",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { selectedRoomId?.let { onRetry(it) } },
+                enabled = selectedRoomId != null
+            ) { Text("재시도 시작") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 카테고리 pill 뱃지 (날짜카드 헤더용)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CategoryPill(category: EventCategory) {
+    val color = categoryColor(category)
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(50.dp))
+            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(50.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            categoryLabel(category),
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
     }
 }
 
