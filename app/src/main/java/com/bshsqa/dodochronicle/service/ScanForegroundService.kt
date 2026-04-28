@@ -218,6 +218,7 @@ class ScanForegroundService : Service() {
             .setAutoCancel(true)
             .setContentIntent(mainActivityPendingIntent())
             .build()
+        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_DETACH)
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, notification)
     }

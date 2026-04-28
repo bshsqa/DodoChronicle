@@ -23,6 +23,9 @@ import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import com.bshsqa.dodochronicle.service.ImportState
 import com.bshsqa.dodochronicle.service.ImportStateHolder
 import com.bshsqa.dodochronicle.service.KakaoImportService
+import com.bshsqa.dodochronicle.service.ScanForegroundService
+import com.bshsqa.dodochronicle.service.ScanState
+import com.bshsqa.dodochronicle.service.ScanStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -69,7 +72,8 @@ data class TimelineUiState(
     val importProgress: ImportProgress? = null,
     val importDone: ImportDoneInfo? = null,
     val needsInit: Boolean = false,
-    val pendingRetryRooms: List<RetryRoomInfo> = emptyList()
+    val pendingRetryRooms: List<RetryRoomInfo> = emptyList(),
+    val isScanRunning: Boolean = false
 )
 
 @HiltViewModel
@@ -82,6 +86,7 @@ class TimelineViewModel @Inject constructor(
     private val syncUseCase: SyncNewPhotosUseCase,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val importStateHolder: ImportStateHolder,
+    private val scanStateHolder: ScanStateHolder,
     private val retryChunkRepository: RetryChunkRepository,
     private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
     private val dataStore: DataStore<Preferences>
@@ -124,6 +129,12 @@ class TimelineViewModel @Inject constructor(
                             RetryRoomInfo(roomId, roomChunks.first().roomAlias, roomChunks.size)
                         })
                     }
+                }
+            }
+
+            launch {
+                scanStateHolder.state.collect { scanState ->
+                    _state.update { it.copy(isScanRunning = scanState is ScanState.Running) }
                 }
             }
 
@@ -394,6 +405,13 @@ class TimelineViewModel @Inject constructor(
                 s.copy(pendingPhotos = s.pendingPhotos.filter { it.uri !in processedUris })
             }
         }
+    }
+
+    fun startManualScan() {
+        val intent = Intent(context, ScanForegroundService::class.java).apply {
+            action = ScanForegroundService.ACTION_START
+        }
+        androidx.core.content.ContextCompat.startForegroundService(context, intent)
     }
 
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
