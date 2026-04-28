@@ -148,10 +148,6 @@ fun TimelineScreen(
                         events = state.events,
                         birthDate = state.birthDate,
                         onDayClick = { date -> selectedDetailDate = date },
-                        onPhotoClick = { photos, index ->
-                            fullscreenPhotos = photos
-                            fullscreenIndex = index
-                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -759,7 +755,6 @@ private fun GroupedTimelineContent(
     events: List<Event>,
     birthDate: LocalDate?,
     onDayClick: (LocalDate) -> Unit,
-    onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
@@ -771,12 +766,10 @@ private fun GroupedTimelineContent(
     ) {
         items(grouped.keys.toList(), key = { it.toString() }) { date ->
             val dayEvents = grouped[date] ?: emptyList()
-            val dayPhotos = dayEvents.filter { it.category == EventCategory.PHOTO }.map { it.content }
             DailyEventCard(
                 date = date,
                 events = dayEvents,
-                onClick = { onDayClick(date) },
-                onPhotoClick = { index -> onPhotoClick(dayPhotos, index) }
+                onClick = { onDayClick(date) }
             )
         }
     }
@@ -786,8 +779,7 @@ private fun GroupedTimelineContent(
 private fun DailyEventCard(
     date: LocalDate,
     events: List<Event>,
-    onClick: () -> Unit,
-    onPhotoClick: (index: Int) -> Unit = {}
+    onClick: () -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts = events.filter { it.category != EventCategory.PHOTO }
@@ -825,7 +817,7 @@ private fun DailyEventCard(
             if (photos.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     photos.take(4).forEachIndexed { idx, event ->
-                        Box(modifier = Modifier.weight(1f).aspectRatio(1f).clickable { onPhotoClick(idx) }) {
+                        Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
                             AsyncImage(
                                 model = event.content,
                                 contentDescription = null,
