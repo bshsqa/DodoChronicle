@@ -69,9 +69,6 @@ keystore.properties
 Thumbs.db
 ehthumbs.db
 
-# ML model files (add manually to assets/)
-*.tflite
-
 # Heap dumps
 *.hprof
 
