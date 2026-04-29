@@ -36,7 +36,7 @@ android {
     buildTypes {
         debug {
             isDebuggable = true
-            buildConfigField("int", "PHOTO_SCAN_LIMIT", "30")
+            buildConfigField("int", "PHOTO_SCAN_LIMIT", "400")
         }
         release {
             isMinifyEnabled = true
