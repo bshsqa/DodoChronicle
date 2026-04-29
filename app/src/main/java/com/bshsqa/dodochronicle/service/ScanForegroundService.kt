@@ -219,12 +219,11 @@ class ScanForegroundService : Service() {
             .setAutoCancel(true)
             .setContentIntent(mainActivityPendingIntent())
             .build()
-        // notify() 를 먼저 호출해 포그라운드 서비스 권한으로 알림 내용을 교체한 뒤,
-        // stopForeground(DETACH) 로 분리하여 완료 알림이 상태바에 남도록 한다.
-        // (순서가 반대이면 DETACH 이후 notify() 에 POST_NOTIFICATIONS 권한이 필요해져
-        //  Android 13+ 에서 묵인 실패 시 진행률 알림이 그대로 남는 문제가 발생한다.)
+        // REMOVE 로 진행률 알림을 완전히 제거한 뒤 새 알림으로 완료 메시지를 게시한다.
+        // 포그라운드 서비스 알림을 DETACH 후 재사용하면 Android 가 강제 설정한
+        // FLAG_ONGOING_EVENT 가 남아 setAutoCancel(true) 가 동작하지 않는다.
+        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, notification)
-        androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_DETACH)
     }
 }
