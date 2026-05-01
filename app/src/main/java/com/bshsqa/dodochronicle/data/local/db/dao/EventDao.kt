@@ -9,6 +9,7 @@ interface EventDao {
     @Query("""
         SELECT * FROM events
         WHERE childId = :childId
+        AND isHidden = 0
         AND (:category IS NULL OR category = :category)
         AND (:onlyFavorite = 0 OR isFavorite = 1)
         ORDER BY date ASC
@@ -30,6 +31,12 @@ interface EventDao {
 
     @Query("UPDATE events SET isFavorite = :isFavorite WHERE id = :id")
     suspend fun setFavorite(id: String, isFavorite: Boolean)
+
+    @Query("UPDATE events SET isHidden = :isHidden WHERE id = :id")
+    suspend fun setHidden(id: String, isHidden: Boolean)
+
+    @Query("SELECT * FROM events WHERE childId = :childId AND isHidden = 1 ORDER BY date ASC")
+    fun observeHidden(childId: String): Flow<List<EventEntity>>
 
     @Query("DELETE FROM events WHERE id = :id")
     suspend fun deleteById(id: String)

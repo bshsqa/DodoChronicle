@@ -11,6 +11,7 @@ class ManageEventUseCase @Inject constructor(
     suspend fun delete(id: String) = eventRepository.delete(id)
     suspend fun deleteEventsBatch(ids: List<String>) = ids.forEach { eventRepository.delete(it) }
     suspend fun setFavorite(id: String, isFavorite: Boolean) = eventRepository.setFavorite(id, isFavorite)
+    suspend fun setHidden(id: String, isHidden: Boolean) = eventRepository.setHidden(id, isHidden)
     suspend fun removePhoto(photoRecordId: String) = eventRepository.deletePhotoRecord(photoRecordId)
     suspend fun deletePhotoRecordsBatch(ids: List<String>) = eventRepository.deletePhotoRecordsBatch(ids)
     suspend fun setExcludeFromModel(photoRecordId: String, excluded: Boolean) =

@@ -31,6 +31,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 import androidx.datastore.core.DataStore
@@ -73,7 +75,8 @@ data class TimelineUiState(
     val importDone: ImportDoneInfo? = null,
     val needsInit: Boolean = false,
     val pendingRetryRooms: List<RetryRoomInfo> = emptyList(),
-    val isScanRunning: Boolean = false
+    val isScanRunning: Boolean = false,
+    val hiddenTextEvents: List<Event> = emptyList()
 )
 
 @HiltViewModel
@@ -193,6 +196,13 @@ class TimelineViewModel @Inject constructor(
                 .collect { events ->
                     _state.update { it.copy(events = events) }
                 }
+            launch {
+                eventRepository.observeHidden(childId).collect { events ->
+                    _state.update {
+                        it.copy(hiddenTextEvents = events.filter { e -> e.category != EventCategory.PHOTO })
+                    }
+                }
+            }
         }
     }
 
@@ -297,6 +307,62 @@ class TimelineViewModel @Inject constructor(
                     source = EventSource.MANUAL
                 )
             )
+        }
+    }
+
+    fun hideTextEvent(event: Event) {
+        if (event.category == EventCategory.PHOTO) return
+        viewModelScope.launch {
+            manageEventUseCase.setHidden(event.id, true)
+            _state.update { it.copy(snackbar = "텍스트 이벤트를 숨겼습니다") }
+        }
+    }
+
+    fun restoreHiddenTextEvent(eventId: String) {
+        viewModelScope.launch {
+            manageEventUseCase.setHidden(eventId, false)
+            _state.update { it.copy(snackbar = "숨김 이벤트를 복원했습니다") }
+        }
+    }
+
+    fun addManualPhotos(uris: List<Uri>) {
+        viewModelScope.launch {
+            val existingUris = eventRepository.getAllPhotoUris().toSet()
+            var added = 0
+            uris.distinct().forEach { uri ->
+                val uriString = uri.toString()
+                if (uriString in existingUris) return@forEach
+                val takenAt = queryTakenAt(uri) ?: System.currentTimeMillis()
+                val date = Instant.ofEpochMilli(takenAt).atZone(ZoneId.systemDefault()).toLocalDate()
+                val eventId = UUID.randomUUID().toString()
+                eventRepository.insert(
+                    Event(
+                        id = eventId, childId = childId, date = date,
+                        category = EventCategory.PHOTO, content = uriString, source = EventSource.MANUAL
+                    )
+                )
+                eventRepository.insertPhotoRecord(
+                    PhotoRecord(
+                        id = UUID.randomUUID().toString(),
+                        eventId = eventId,
+                        localUri = uriString,
+                        takenAt = takenAt,
+                        isExcludedFromModel = true
+                    )
+                )
+                added++
+            }
+            _state.update { it.copy(snackbar = "${added}장 추가됨") }
+        }
+    }
+
+    private fun queryTakenAt(uri: Uri): Long? {
+        return context.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.Images.Media.DATE_TAKEN),
+            null, null, null
+        )?.use { c ->
+            if (!c.moveToFirst()) null else c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN))
         }
     }
 

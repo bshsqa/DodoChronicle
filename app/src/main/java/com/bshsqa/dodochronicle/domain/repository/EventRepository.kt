@@ -16,6 +16,8 @@ interface EventRepository {
     suspend fun insert(event: Event)
     suspend fun insertAll(events: List<Event>)
     suspend fun setFavorite(id: String, isFavorite: Boolean)
+    suspend fun setHidden(id: String, isHidden: Boolean)
+    fun observeHidden(childId: String): Flow<List<Event>>
     suspend fun delete(id: String)
     suspend fun deleteAllForChild(childId: String)
 

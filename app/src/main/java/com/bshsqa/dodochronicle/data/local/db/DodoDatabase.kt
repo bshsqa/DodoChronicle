@@ -16,7 +16,7 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -62,6 +62,13 @@ abstract class DodoDatabase : RoomDatabase() {
                         createdAt INTEGER NOT NULL
                     )
                     """.trimIndent()
+                )
+            }
+        }
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE events ADD COLUMN isHidden INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }
