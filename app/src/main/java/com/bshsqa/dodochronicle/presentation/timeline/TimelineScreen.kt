@@ -67,6 +67,8 @@ fun TimelineScreen(
     var showResetConfirm by remember { mutableStateOf(false) }
     var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
+    var showHiddenItemsDialog by remember { mutableStateOf(false) }
+    var showDayPhotosDialog by remember { mutableStateOf<List<String>?>(null) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -80,6 +82,11 @@ fun TimelineScreen(
         ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.importKakao(it, kakaoImportAlias) }
+    }
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        if (uris.isNotEmpty()) viewModel.addManualPhotos(uris)
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -109,6 +116,13 @@ fun TimelineScreen(
                     }
                     IconButton(onClick = { showSettingsMenu = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "설정")
+                    }
+                    IconButton(onClick = {
+                        photoPickerLauncher.launch(
+                            ActivityResultContracts.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }) {
+                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = "사진 추가")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -148,6 +162,7 @@ fun TimelineScreen(
                         events = state.events,
                         birthDate = state.birthDate,
                         onDayClick = { date -> selectedDetailDate = date },
+                        onDayPhotosClick = { photos -> showDayPhotosDialog = photos },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -293,6 +308,10 @@ fun TimelineScreen(
                 viewModel.startManualScan()
             },
             isScanRunning = state.isScanRunning,
+            onHiddenItems = {
+                showSettingsMenu = false
+                showHiddenItemsDialog = true
+            },
             onReset = {
                 showSettingsMenu = false
                 showResetConfirm = true
@@ -343,6 +362,25 @@ fun TimelineScreen(
                 viewModel.processPendingPhotos(acceptedUris, rejectedUris)
                 showPendingDialog = false
             }
+        )
+    }
+
+    showDayPhotosDialog?.let { photos ->
+        DayPhotosDialog(
+            photos = photos,
+            onDismiss = { showDayPhotosDialog = null },
+            onPhotoClick = { index ->
+                fullscreenPhotos = photos
+                fullscreenIndex = index
+            }
+        )
+    }
+
+    if (showHiddenItemsDialog) {
+        HiddenItemsDialog(
+            events = state.hiddenTextEvents,
+            onDismiss = { showHiddenItemsDialog = false },
+            onRestore = viewModel::restoreHiddenTextEvent
         )
     }
 }
@@ -755,6 +793,7 @@ private fun GroupedTimelineContent(
     events: List<Event>,
     birthDate: LocalDate?,
     onDayClick: (LocalDate) -> Unit,
+    onDayPhotosClick: (List<String>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
@@ -769,7 +808,8 @@ private fun GroupedTimelineContent(
             DailyEventCard(
                 date = date,
                 events = dayEvents,
-                onClick = { onDayClick(date) }
+                onClick = { onDayClick(date) },
+                onDayPhotosClick = onDayPhotosClick
             )
         }
     }
@@ -779,7 +819,8 @@ private fun GroupedTimelineContent(
 private fun DailyEventCard(
     date: LocalDate,
     events: List<Event>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDayPhotosClick: (List<String>) -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts = events.filter { it.category != EventCategory.PHOTO }
@@ -847,6 +888,7 @@ private fun DailyEventCard(
                         Spacer(Modifier.weight(1f))
                     }
                 }
+                TextButton(onClick = { onDayPhotosClick(photos.map { it.content }) }) { Text("사진+") }
                 if (texts.isNotEmpty()) Spacer(Modifier.height(8.dp))
             }
 
@@ -1094,6 +1136,11 @@ private fun DailyDetailDialog(
                                 },
                                 onClick = { onToggleFavorite(event); showMenu = false }
                             )
+                            DropdownMenuItem(
+                                text = { Text("숨기기") },
+                                leadingIcon = { Icon(Icons.Default.VisibilityOff, null) },
+                                onClick = { viewModel.hideTextEvent(event); showMenu = false }
+                            )
                         }
                     }
                 }
@@ -1305,6 +1352,7 @@ private fun SettingsMenuDialog(
     onRetry: () -> Unit,
     onScan: () -> Unit,
     isScanRunning: Boolean,
+    onHiddenItems: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1342,6 +1390,18 @@ private fun SettingsMenuDialog(
                         if (isScanRunning) "사진 분석 중..." else "신규 사진 로딩",
                         modifier = Modifier.weight(1f)
                     )
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onHiddenItems,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("숨김 아이템", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
                 TextButton(
@@ -1581,4 +1641,70 @@ private fun FullscreenPhotoViewer(
             )
         }
     }
+}
+
+@Composable
+private fun DayPhotosDialog(
+    photos: List<String>,
+    onDismiss: () -> Unit,
+    onPhotoClick: (Int) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("사진+") },
+        text = {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.heightIn(max = 420.dp)
+            ) {
+                gridItems(photos.indices.toList()) { index ->
+                    AsyncImage(
+                        model = photos[index],
+                        contentDescription = null,
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onPhotoClick(index) },
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } }
+    )
+}
+
+@Composable
+private fun HiddenItemsDialog(
+    events: List<Event>,
+    onDismiss: () -> Unit,
+    onRestore: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("숨김 아이템") },
+        text = {
+            if (events.isEmpty()) {
+                Text("숨김 항목이 없습니다")
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(events.sortedBy { it.date }, key = { it.id }) { event ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(onClick = {}, onLongClick = { onRestore(event.id) }),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${event.date} · ${categoryLabel(event.category)}\n${event.content}", modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.Restore, contentDescription = null)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } }
+    )
 }

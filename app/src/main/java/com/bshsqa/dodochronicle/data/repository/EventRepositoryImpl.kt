@@ -30,6 +30,9 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun insert(event: Event) = eventDao.insert(event.toEntity())
     override suspend fun insertAll(events: List<Event>) = eventDao.insertAll(events.map { it.toEntity() })
     override suspend fun setFavorite(id: String, isFavorite: Boolean) = eventDao.setFavorite(id, isFavorite)
+    override suspend fun setHidden(id: String, isHidden: Boolean) = eventDao.setHidden(id, isHidden)
+    override fun observeHidden(childId: String): Flow<List<Event>> =
+        eventDao.observeHidden(childId).map { list -> list.map { it.toDomain() } }
     override suspend fun delete(id: String) = eventDao.deleteById(id)
     override suspend fun deleteAllForChild(childId: String) = eventDao.deleteAllForChild(childId)
 
@@ -61,7 +64,8 @@ class EventRepositoryImpl @Inject constructor(
         source = EventSource.valueOf(source),
         createdAt = createdAt,
         longContent = longContent,
-        rawExcerpt = rawExcerpt
+        rawExcerpt = rawExcerpt,
+        isHidden = isHidden
     )
 
     private fun Event.toEntity() = EventEntity(
@@ -71,7 +75,8 @@ class EventRepositoryImpl @Inject constructor(
         content = content, isFavorite = isFavorite,
         source = source.name,
         longContent = longContent,
-        rawExcerpt = rawExcerpt
+        rawExcerpt = rawExcerpt,
+        isHidden = isHidden
     )
 
     private fun PhotoRecordEntity.toDomain() = PhotoRecord(

@@ -15,5 +15,6 @@ data class Event(
     val source: EventSource,
     val createdAt: Long = System.currentTimeMillis(),
     val longContent: String? = null,
-    val rawExcerpt: String? = null
+    val rawExcerpt: String? = null,
+    val isHidden: Boolean = false
 )

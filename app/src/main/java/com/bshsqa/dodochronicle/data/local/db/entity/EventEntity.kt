@@ -25,5 +25,6 @@ data class EventEntity(
     val source: String,
     val createdAt: Long = System.currentTimeMillis(),
     val longContent: String? = null,
-    val rawExcerpt: String? = null
+    val rawExcerpt: String? = null,
+    val isHidden: Boolean = false
 )
