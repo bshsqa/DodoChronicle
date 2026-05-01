@@ -15,8 +15,11 @@ class UpdateChildEmbeddingUseCase @Inject constructor(
     private val eventRepository: EventRepository
 ) {
     suspend operator fun invoke(childId: String) = withContext(Dispatchers.Default) {
-        val embeddings = eventRepository.getLatest50Embeddings()
-        if (embeddings.isEmpty()) return@withContext
+        val embeddings = eventRepository.getLatest50Embeddings(childId)
+        if (embeddings.isEmpty()) {
+            childRepository.updateEmbeddings(childId, emptyList())
+            return@withContext
+        }
 
         val dim = embeddings.first().size
         val average = FloatArray(dim) { idx ->

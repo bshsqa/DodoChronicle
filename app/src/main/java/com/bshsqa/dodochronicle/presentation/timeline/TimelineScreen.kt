@@ -1,6 +1,7 @@
 package com.bshsqa.dodochronicle.presentation.timeline
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -68,7 +69,6 @@ fun TimelineScreen(
     var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var showHiddenItemsDialog by remember { mutableStateOf(false) }
-    var showDayPhotosDialog by remember { mutableStateOf<List<String>?>(null) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -119,7 +119,7 @@ fun TimelineScreen(
                     }
                     IconButton(onClick = {
                         photoPickerLauncher.launch(
-                            ActivityResultContracts.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
                     }) {
                         Icon(Icons.Default.AddPhotoAlternate, contentDescription = "사진 추가")
@@ -162,7 +162,6 @@ fun TimelineScreen(
                         events = state.events,
                         birthDate = state.birthDate,
                         onDayClick = { date -> selectedDetailDate = date },
-                        onDayPhotosClick = { photos -> showDayPhotosDialog = photos },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -249,6 +248,7 @@ fun TimelineScreen(
             date = detailDate,
             events = dayEvents,
             onDismiss = { selectedDetailDate = null },
+            photoRecordsByEventId = state.photoRecordsByEventId,
             onDeleteBatch = { ids ->
                 viewModel.deletePhotoEventsBatch(ids)
                 selectedDetailDate = null
@@ -258,6 +258,11 @@ fun TimelineScreen(
             },
             onToggleFavorite = viewModel::toggleFavorite,
             onSetFavoriteBatch = { ids, fav -> viewModel.setFavoriteBatch(ids, fav) },
+            onHideTextEvent = { event ->
+                viewModel.hideTextEvent(event)
+                if (dayEvents.size <= 1) selectedDetailDate = null
+            },
+            onShowDevicePhotos = { viewModel.loadDevicePhotosForDate(detailDate) },
             onPhotoClick = { photos, index ->
                 fullscreenPhotos = photos
                 fullscreenIndex = index
@@ -365,12 +370,12 @@ fun TimelineScreen(
         )
     }
 
-    showDayPhotosDialog?.let { photos ->
+    state.deviceDayPhotos?.let { devicePhotos ->
         DayPhotosDialog(
-            photos = photos,
-            onDismiss = { showDayPhotosDialog = null },
+            photos = devicePhotos.uris,
+            onDismiss = viewModel::dismissDeviceDayPhotos,
             onPhotoClick = { index ->
-                fullscreenPhotos = photos
+                fullscreenPhotos = devicePhotos.uris
                 fullscreenIndex = index
             }
         )
@@ -380,7 +385,10 @@ fun TimelineScreen(
         HiddenItemsDialog(
             events = state.hiddenTextEvents,
             onDismiss = { showHiddenItemsDialog = false },
-            onRestore = viewModel::restoreHiddenTextEvent
+            onRestore = { ids ->
+                viewModel.restoreHiddenTextEvents(ids)
+                if (ids.size >= state.hiddenTextEvents.size) showHiddenItemsDialog = false
+            }
         )
     }
 }
@@ -793,7 +801,6 @@ private fun GroupedTimelineContent(
     events: List<Event>,
     birthDate: LocalDate?,
     onDayClick: (LocalDate) -> Unit,
-    onDayPhotosClick: (List<String>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
@@ -808,8 +815,7 @@ private fun GroupedTimelineContent(
             DailyEventCard(
                 date = date,
                 events = dayEvents,
-                onClick = { onDayClick(date) },
-                onDayPhotosClick = onDayPhotosClick
+                onClick = { onDayClick(date) }
             )
         }
     }
@@ -819,8 +825,7 @@ private fun GroupedTimelineContent(
 private fun DailyEventCard(
     date: LocalDate,
     events: List<Event>,
-    onClick: () -> Unit,
-    onDayPhotosClick: (List<String>) -> Unit
+    onClick: () -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts = events.filter { it.category != EventCategory.PHOTO }
@@ -888,7 +893,6 @@ private fun DailyEventCard(
                         Spacer(Modifier.weight(1f))
                     }
                 }
-                TextButton(onClick = { onDayPhotosClick(photos.map { it.content }) }) { Text("사진+") }
                 if (texts.isNotEmpty()) Spacer(Modifier.height(8.dp))
             }
 
@@ -923,10 +927,13 @@ private fun DailyDetailDialog(
     date: LocalDate,
     events: List<Event>,
     onDismiss: () -> Unit,
+    photoRecordsByEventId: Map<String, PhotoRecord>,
     onDeleteBatch: (List<String>) -> Unit,
     onExcludeBatch: (List<PhotoRecord>, Boolean) -> Unit,
     onToggleFavorite: (Event) -> Unit,
     onSetFavoriteBatch: (List<String>, Boolean) -> Unit,
+    onHideTextEvent: (Event) -> Unit,
+    onShowDevicePhotos: () -> Unit,
     onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> }
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
@@ -936,13 +943,9 @@ private fun DailyDetailDialog(
     var selectedTextEvent by remember { mutableStateOf<Event?>(null) }
     val isSelectMode = selectedIds.isNotEmpty()
 
-    // 선택된 사진들의 PhotoRecord를 얻으려면 UI상에서 event.content(uri)로 대리
-    // 실제 PhotoRecord 모델은 여기서 직접 접근 불가(VM을 통해야 함)
-    // → 단순화: exclude 판단은 Event에 없으므로, 선택 시 isExcluded 상태를 별도 mutableStateMap으로 관리
-    val excludedEventIds = remember { mutableStateMapOf<String, Boolean>() }
-
     val selectedPhotoEvents = photos.filter { it.id in selectedIds }
-    val selectedExcludeStates = selectedPhotoEvents.map { excludedEventIds[it.id] ?: false }
+    val selectedPhotoRecords = selectedPhotoEvents.mapNotNull { photoRecordsByEventId[it.id] }
+    val selectedExcludeStates = selectedPhotoRecords.map { it.isExcludedFromModel }
     val allSameExcludeState = selectedExcludeStates.toSet().size <= 1
     val currentExcludeState = selectedExcludeStates.firstOrNull() ?: false
 
@@ -976,19 +979,13 @@ private fun DailyDetailDialog(
                     // 학습 제외 토글 (혼합 상태면 비활성화)
                     IconButton(
                         onClick = {
-                            val fakeRecords = selectedPhotoEvents.map { ev ->
-                                PhotoRecord(
-                                    id = ev.id, eventId = ev.id,
-                                    localUri = ev.content, takenAt = 0L,
-                                    isExcludedFromModel = currentExcludeState
-                                )
-                            }
                             val newExcluded = !currentExcludeState
-                            onExcludeBatch(fakeRecords, newExcluded)
-                            selectedPhotoEvents.forEach { excludedEventIds[it.id] = newExcluded }
+                            onExcludeBatch(selectedPhotoRecords, newExcluded)
                             selectedIds = setOf()
                         },
-                        enabled = allSameExcludeState && selectedIds.isNotEmpty()
+                        enabled = allSameExcludeState &&
+                            selectedIds.isNotEmpty() &&
+                            selectedPhotoRecords.size == selectedPhotoEvents.size
                     ) {
                         Icon(
                             if (currentExcludeState) Icons.Default.VisibilityOff else Icons.Default.Visibility,
@@ -1014,6 +1011,21 @@ private fun DailyDetailDialog(
         },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!isSelectMode) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                date.format(DateTimeFormatter.ofPattern("yyyy. M. d.")),
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onShowDevicePhotos) { Text("사진+") }
+                        }
+                    }
+                }
                 // 사진 그리드
                 if (photos.isNotEmpty()) {
                     item {
@@ -1025,7 +1037,7 @@ private fun DailyDetailDialog(
                         ) {
                             gridItems(photos, key = { it.id }) { event ->
                                 val isSelected = event.id in selectedIds
-                                val isExcluded = excludedEventIds[event.id] ?: false
+                                val isExcluded = photoRecordsByEventId[event.id]?.isExcludedFromModel ?: false
 
                                 Box(
                                     modifier = Modifier
@@ -1139,7 +1151,7 @@ private fun DailyDetailDialog(
                             DropdownMenuItem(
                                 text = { Text("숨기기") },
                                 leadingIcon = { Icon(Icons.Default.VisibilityOff, null) },
-                                onClick = { viewModel.hideTextEvent(event); showMenu = false }
+                                onClick = { onHideTextEvent(event); showMenu = false }
                             )
                         }
                     }
@@ -1680,8 +1692,11 @@ private fun DayPhotosDialog(
 private fun HiddenItemsDialog(
     events: List<Event>,
     onDismiss: () -> Unit,
-    onRestore: (String) -> Unit
+    onRestore: (List<String>) -> Unit
 ) {
+    var selectedIds by remember(events) { mutableStateOf(setOf<String>()) }
+    val sortedEvents = remember(events) { events.sortedBy { it.date } }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("숨김 아이템") },
@@ -1690,21 +1705,44 @@ private fun HiddenItemsDialog(
                 Text("숨김 항목이 없습니다")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(events.sortedBy { it.date }, key = { it.id }) { event ->
+                    items(sortedEvents, key = { it.id }) { event ->
+                        val selected = event.id in selectedIds
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .combinedClickable(onClick = {}, onLongClick = { onRestore(event.id) }),
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable {
+                                    selectedIds = if (selected) selectedIds - event.id else selectedIds + event.id
+                                }
+                                .padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("${event.date} · ${categoryLabel(event.category)}\n${event.content}", modifier = Modifier.weight(1f))
-                            Icon(Icons.Default.Restore, contentDescription = null)
+                            Icon(
+                                if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.outline
+                            )
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } }
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onRestore(selectedIds.toList())
+                    selectedIds = setOf()
+                },
+                enabled = selectedIds.isNotEmpty()
+            ) { Text("복구") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("닫기") } }
     )
 }

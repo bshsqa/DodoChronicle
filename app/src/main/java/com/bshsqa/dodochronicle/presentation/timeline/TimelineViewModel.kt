@@ -61,6 +61,11 @@ data class RetryRoomInfo(
     val chunkCount: Int
 )
 
+data class DeviceDayPhotos(
+    val date: LocalDate,
+    val uris: List<String>
+)
+
 data class TimelineUiState(
     val childName: String = "",
     val birthDate: LocalDate? = null,
@@ -76,7 +81,9 @@ data class TimelineUiState(
     val needsInit: Boolean = false,
     val pendingRetryRooms: List<RetryRoomInfo> = emptyList(),
     val isScanRunning: Boolean = false,
-    val hiddenTextEvents: List<Event> = emptyList()
+    val hiddenTextEvents: List<Event> = emptyList(),
+    val photoRecordsByEventId: Map<String, PhotoRecord> = emptyMap(),
+    val deviceDayPhotos: DeviceDayPhotos? = null
 )
 
 @HiltViewModel
@@ -189,13 +196,24 @@ class TimelineViewModel @Inject constructor(
                 }
             }
 
-            combine(_filterCategory, _onlyFavorite) { cat, fav -> cat to fav }
-                .flatMapLatest { (cat, fav) ->
-                    eventRepository.observe(childId, cat, fav)
+            launch {
+                combine(_filterCategory, _onlyFavorite) { cat, fav -> cat to fav }
+                    .flatMapLatest { (cat, fav) ->
+                        eventRepository.observe(childId, cat, fav)
+                    }
+                    .collect { events ->
+                        _state.update { it.copy(events = events) }
+                    }
+            }
+
+            launch {
+                eventRepository.observePhotoRecordsForChild(childId).collect { records ->
+                    _state.update {
+                        it.copy(photoRecordsByEventId = records.associateBy { record -> record.eventId })
+                    }
                 }
-                .collect { events ->
-                    _state.update { it.copy(events = events) }
-                }
+            }
+
             launch {
                 eventRepository.observeHidden(childId).collect { events ->
                     _state.update {
@@ -325,6 +343,24 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun restoreHiddenTextEvents(eventIds: List<String>) {
+        if (eventIds.isEmpty()) return
+        viewModelScope.launch {
+            eventIds.forEach { id -> manageEventUseCase.setHidden(id, false) }
+            _state.update { it.copy(snackbar = "${eventIds.size}개 이벤트를 복원했습니다") }
+        }
+    }
+
+    fun loadDevicePhotosForDate(date: LocalDate) {
+        viewModelScope.launch {
+            _state.update { it.copy(deviceDayPhotos = DeviceDayPhotos(date, queryPhotosForDate(date))) }
+        }
+    }
+
+    fun dismissDeviceDayPhotos() {
+        _state.update { it.copy(deviceDayPhotos = null) }
+    }
+
     fun addManualPhotos(uris: List<Uri>) {
         viewModelScope.launch {
             val existingUris = eventRepository.getAllPhotoUris().toSet()
@@ -364,6 +400,28 @@ class TimelineViewModel @Inject constructor(
         )?.use { c ->
             if (!c.moveToFirst()) null else c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN))
         }
+    }
+
+    private fun queryPhotosForDate(date: LocalDate): List<String> {
+        val start = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val uris = mutableListOf<String>()
+
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_TAKEN),
+            "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATE_TAKEN} < ?",
+            arrayOf(start.toString(), end.toString()),
+            "${MediaStore.Images.Media.DATE_TAKEN} DESC"
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idCol)
+                uris.add(Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString()).toString())
+            }
+        }
+
+        return uris
     }
 
     fun importKakao(uri: Uri, roomAlias: String) {

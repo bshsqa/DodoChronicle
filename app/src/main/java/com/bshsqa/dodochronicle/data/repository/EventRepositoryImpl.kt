@@ -48,13 +48,16 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun deleteAllPhotoRecords() = photoDao.deleteAll()
     override suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean) =
         photoDao.setExcludedFromModel(photoRecordId, excluded)
-    override suspend fun getLatest50Embeddings(): List<FloatArray> =
-        photoDao.getLatest50Embeddings().map { json ->
+    override suspend fun getLatest50Embeddings(childId: String): List<FloatArray> =
+        photoDao.getLatest50Embeddings(childId).map { json ->
             try { Json.decodeFromString<List<Float>>(json).toFloatArray() } catch (e: Exception) { floatArrayOf() }
         }.filter { it.isNotEmpty() }
 
     override fun observePhotosForEvent(eventId: String): Flow<List<PhotoRecord>> =
         photoDao.observeForEvent(eventId).map { list -> list.map { it.toDomain() } }
+
+    override fun observePhotoRecordsForChild(childId: String): Flow<List<PhotoRecord>> =
+        photoDao.observeForChild(childId).map { list -> list.map { it.toDomain() } }
 
     private fun EventEntity.toDomain() = Event(
         id = id, childId = childId,

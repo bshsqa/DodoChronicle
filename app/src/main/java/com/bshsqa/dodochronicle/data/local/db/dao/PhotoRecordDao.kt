@@ -9,6 +9,13 @@ interface PhotoRecordDao {
     @Query("SELECT * FROM photo_records WHERE eventId = :eventId")
     fun observeForEvent(eventId: String): Flow<List<PhotoRecordEntity>>
 
+    @Query("""
+        SELECT photo_records.* FROM photo_records
+        INNER JOIN events ON events.id = photo_records.eventId
+        WHERE events.childId = :childId
+    """)
+    fun observeForChild(childId: String): Flow<List<PhotoRecordEntity>>
+
     @Query("SELECT localUri FROM photo_records")
     suspend fun getAllUris(): List<String>
 
@@ -28,12 +35,14 @@ interface PhotoRecordDao {
     suspend fun setExcludedFromModel(id: String, excluded: Boolean)
 
     @Query("""
-        SELECT faceEmbeddingJson FROM photo_records
-        WHERE isExcludedFromModel = 0
+        SELECT photo_records.faceEmbeddingJson FROM photo_records
+        INNER JOIN events ON events.id = photo_records.eventId
+        WHERE events.childId = :childId
+        AND photo_records.isExcludedFromModel = 0
         ORDER BY takenAt DESC
         LIMIT 50
     """)
-    suspend fun getLatest50Embeddings(): List<String>
+    suspend fun getLatest50Embeddings(childId: String): List<String>
 
     @Query("DELETE FROM photo_records")
     suspend fun deleteAll()
