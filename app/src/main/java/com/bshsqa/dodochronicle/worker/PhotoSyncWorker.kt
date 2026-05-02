@@ -3,13 +3,17 @@ package com.bshsqa.dodochronicle.worker
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
+import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.last
 import java.util.concurrent.TimeUnit
 
@@ -18,13 +22,16 @@ class PhotoSyncWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted params: WorkerParameters,
     private val syncUseCase: SyncNewPhotosUseCase,
-    private val eventRepository: EventRepository
+    private val eventRepository: EventRepository,
+    private val dataStore: DataStore<Preferences>
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         return try {
-            val lastScanAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
-            val newPhotos = queryNewPhotos(lastScanAt)
+            val lastPhotoTakenAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
+            val initialCutoffAt = dataStore.data.first()[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] ?: 0L
+            val syncAfter = maxOf(lastPhotoTakenAt, initialCutoffAt)
+            val newPhotos = queryNewPhotos(syncAfter)
             if (newPhotos.isEmpty()) return Result.success()
             syncUseCase.invoke(newPhotos).last()
             Result.success()

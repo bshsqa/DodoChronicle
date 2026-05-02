@@ -47,6 +47,7 @@ class ScanForegroundService : Service() {
         const val ACTION_START  = "com.bshsqa.dodochronicle.action.SCAN_START"
         const val ACTION_CANCEL = "com.bshsqa.dodochronicle.action.SCAN_CANCEL"
         private const val NOTIFICATION_ID = 1001
+        private const val RESULT_NOTIFICATION_ID = 1003
         private const val WAKELOCK_TAG = "DodoChronicle::ScanWakeLock"
         private const val WAKELOCK_TIMEOUT_MS = 30 * 60 * 1000L // 30분
     }
@@ -211,7 +212,7 @@ class ScanForegroundService : Service() {
     }
 
     private fun showCompletedNotification() {
-        val notification = Notification.Builder(this, DodoApp.SCAN_CHANNEL_ID)
+        val notification = Notification.Builder(this, DodoApp.SCAN_RESULT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_scan)
             .setContentTitle("사진 분류 완료")
             .setContentText("앱을 열어 아이 그룹을 선택해주세요.")
@@ -224,6 +225,6 @@ class ScanForegroundService : Service() {
         // FLAG_ONGOING_EVENT 가 남아 setAutoCancel(true) 가 동작하지 않는다.
         androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, notification)
+            .notify(RESULT_NOTIFICATION_ID, notification)
     }
 }

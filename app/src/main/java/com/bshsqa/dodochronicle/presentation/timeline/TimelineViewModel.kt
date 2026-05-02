@@ -41,6 +41,8 @@ import javax.inject.Inject
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
+import kotlinx.coroutines.flow.first
 
 data class ImportProgress(
     val chunksDone: Int,
@@ -267,8 +269,10 @@ class TimelineViewModel @Inject constructor(
 
     private suspend fun syncNewPhotos() {
         try {
-            val lastScanAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
-            val newPhotos = queryNewPhotos(lastScanAt)
+            val lastPhotoTakenAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
+            val initialCutoffAt = dataStore.data.first()[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] ?: 0L
+            val syncAfter = maxOf(lastPhotoTakenAt, initialCutoffAt)
+            val newPhotos = queryNewPhotos(syncAfter)
             if (newPhotos.isEmpty()) return
 
             syncUseCase.invoke(newPhotos).collect { progress ->

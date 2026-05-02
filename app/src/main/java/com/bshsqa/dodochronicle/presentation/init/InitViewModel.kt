@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +18,7 @@ import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
 import com.bshsqa.dodochronicle.ml.PhotoEmbedding
+import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
 import com.bshsqa.dodochronicle.service.ScanForegroundService
 import com.bshsqa.dodochronicle.service.ScanState
 import com.bshsqa.dodochronicle.service.ScanStateHolder
@@ -35,8 +35,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
-
-private val KEY_INITIALIZED = booleanPreferencesKey("initialized")
 
 data class ClusterUiModel(val id: Int, val previewUris: List<String>, val count: Int)
 
@@ -227,12 +225,32 @@ class InitViewModel @Inject constructor(
             // 3. 최신 50장 기준으로 기준 임베딩 벡터 갱신
             updateEmbeddingUseCase(child.id)
 
-            // 4. ScanStateHolder 초기화 후 완료 처리
+            // 4. 초기 등록 시점 이전의 갤러리 사진은 "신규 사진" 동기화 대상에서 제외
+            val initialPhotoCutoffAt = queryLatestGalleryPhotoTakenAt().takeIf { it > 0L }
+                ?: System.currentTimeMillis()
+
+            // 5. ScanStateHolder 초기화 후 완료 처리
             stateHolder.reset()
-            dataStore.edit { prefs -> prefs[KEY_INITIALIZED] = true }
+            dataStore.edit { prefs ->
+                prefs[AppPrefsKeys.INITIALIZED] = true
+                prefs[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] = initialPhotoCutoffAt
+            }
             _uiState.update { it.copy(step = InitStep.Done) }
         }
     }
 
     fun dismissError() = _uiState.update { it.copy(error = null) }
+
+    private fun queryLatestGalleryPhotoTakenAt(): Long {
+        return context.contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.Images.Media.DATE_TAKEN),
+            null,
+            null,
+            "${android.provider.MediaStore.Images.Media.DATE_TAKEN} DESC"
+        )?.use { cursor ->
+            val dateCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATE_TAKEN)
+            if (cursor.moveToFirst()) cursor.getLong(dateCol) else 0L
+        } ?: 0L
+    }
 }
