@@ -15,6 +15,8 @@ interface EventRepository {
     suspend fun getById(id: String): Event?
     suspend fun insert(event: Event)
     suspend fun insertAll(events: List<Event>)
+    suspend fun getAllTextEvents(childId: String): List<Event>
+    suspend fun updateTextEmbedding(eventId: String, textEmbeddingJson: String)
     suspend fun setFavorite(id: String, isFavorite: Boolean)
     suspend fun setHidden(id: String, isHidden: Boolean)
     fun observeHidden(childId: String): Flow<List<Event>>

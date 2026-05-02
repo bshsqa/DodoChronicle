@@ -95,12 +95,17 @@ dependencies {
     // WorkManager
     implementation(libs.work.runtime.ktx)
 
-    // ML Kit / MediaPipe
+    // ML Kit
     implementation(libs.mlkit.face.detection)
-    implementation(libs.mediapipe.tasks.text)
 
     // TFLite
     implementation(libs.tflite.core)
+
+    // ONNX / Tokenizers
+    implementation(libs.onnxruntime.android)
+    implementation(libs.djl.api)
+    implementation(libs.djl.huggingface.tokenizers)
+    runtimeOnly(libs.djl.android.tokenizer.native)
 
     // Coroutines
     implementation(libs.coroutines.android)
@@ -127,4 +132,3 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }
-

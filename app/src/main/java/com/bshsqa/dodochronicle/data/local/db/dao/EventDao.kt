@@ -29,6 +29,17 @@ interface EventDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(events: List<EventEntity>)
 
+    @Query("""
+        SELECT * FROM events
+        WHERE childId = :childId
+        AND category != 'PHOTO'
+        ORDER BY date ASC
+    """)
+    suspend fun getAllTextEvents(childId: String): List<EventEntity>
+
+    @Query("UPDATE events SET textEmbeddingJson = :textEmbeddingJson WHERE id = :id")
+    suspend fun updateTextEmbedding(id: String, textEmbeddingJson: String)
+
     @Query("UPDATE events SET isFavorite = :isFavorite WHERE id = :id")
     suspend fun setFavorite(id: String, isFavorite: Boolean)
 

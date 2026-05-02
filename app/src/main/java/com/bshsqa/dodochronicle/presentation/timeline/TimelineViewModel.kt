@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
@@ -137,6 +138,14 @@ class TimelineViewModel @Inject constructor(
             launch { syncNewPhotos() }
 
             launch {
+                textEmbeddingEngine.logSelfTestIfNeeded()
+            }
+
+            launch {
+                ensureTextEmbeddingsUpToDate()
+            }
+
+            launch {
                 kakaoRepository.observeRooms().collect { rooms ->
                     _state.update { it.copy(kakaoRooms = rooms) }
                 }
@@ -220,20 +229,31 @@ class TimelineViewModel @Inject constructor(
                         if (query.isBlank()) {
                             events
                         } else if (isContextSearch) {
+                            val embeddingHealthy = textEmbeddingEngine.isHealthyForSemanticSearch()
+                            if (!embeddingHealthy && BuildConfig.DEBUG) {
+                                Log.w(
+                                    "TimelineContextSearch",
+                                    "Semantic search model is not healthy. Expected asset=${com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_ASSET_PATH}"
+                                )
+                            }
                             val queryEmbedding = textEmbeddingEngine.getEmbedding(query)
-                            events.mapNotNull { event ->
+                            val scoredEvents = events.mapNotNull { event ->
                                 if (event.category == EventCategory.PHOTO) null else event
                             }
                             .map { event ->
-                                val searchableText = buildContextSearchText(event)
-                                val eventEmbedding = textEmbeddingEngine.getEmbedding(searchableText)
+                                val eventEmbedding = parseEmbeddingJson(event.textEmbeddingJson)
                                 event to com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.cosineSimilarity(
                                     queryEmbedding,
                                     eventEmbedding
                                 )
                             }
-                            .filter { (_, similarity) -> similarity >= 0.72f }
-                            .map { (event, _) -> event }
+                            .sortedByDescending { it.second }
+
+                            debugLogContextSearch(query, scoredEvents)
+
+                            scoredEvents
+                                .filter { (_, similarity) -> similarity >= 0.72f }
+                                .map { (event, _) -> event }
                         } else {
                             val keywords = query.split("\\s+".toRegex()).filter { it.isNotBlank() }
                             events.filter { event ->
@@ -677,5 +697,63 @@ class TimelineViewModel @Inject constructor(
             event.longContent?.takeIf { it.isNotBlank() },
             event.rawExcerpt?.takeIf { it.isNotBlank() }
         ).joinToString("\n")
+    }
+
+    private fun parseEmbeddingJson(textEmbeddingJson: String): FloatArray {
+        return try {
+            Json.decodeFromString<List<Float>>(textEmbeddingJson).toFloatArray()
+        } catch (_: Exception) {
+            floatArrayOf()
+        }
+    }
+
+    private suspend fun ensureTextEmbeddingsUpToDate() {
+        if (childId.isBlank()) return
+        val currentVersion = dataStore.data.first()[AppPrefsKeys.TEXT_EMBEDDING_MODEL_VERSION] ?: 0L
+        if (currentVersion >= com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_VERSION) return
+
+        try {
+            if (!textEmbeddingEngine.isHealthyForSemanticSearch()) {
+                Log.w("TimelineContextSearch", "Skip text embedding backfill because ONNX engine is not healthy")
+                return
+            }
+            val events = eventRepository.getAllTextEvents(childId)
+            events.forEach { event ->
+                val embedding = textEmbeddingEngine.getEmbedding(buildContextSearchText(event))
+                if (embedding.isEmpty()) return@forEach
+                val embeddingJson = Json.encodeToString(
+                    ListSerializer(Float.serializer()),
+                    embedding.toList()
+                )
+                eventRepository.updateTextEmbedding(event.id, embeddingJson)
+            }
+            dataStore.edit { prefs ->
+                prefs[AppPrefsKeys.TEXT_EMBEDDING_MODEL_VERSION] =
+                    com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_VERSION
+            }
+            if (BuildConfig.DEBUG) {
+                Log.d("TimelineContextSearch", "Text embedding backfill completed for ${events.size} events")
+            }
+        } catch (e: Exception) {
+            Log.e("TimelineContextSearch", "Failed to backfill text embeddings", e)
+        }
+    }
+
+    private fun debugLogContextSearch(query: String, scoredEvents: List<Pair<Event, Float>>) {
+        if (!BuildConfig.DEBUG) return
+        val topMatches = scoredEvents.take(5).joinToString(separator = " | ") { (event, similarity) ->
+            "${"%.3f".format(similarity)}:${event.content.take(24)}"
+        }
+        val scoreRange = if (scoredEvents.isEmpty()) {
+            "empty"
+        } else {
+            val max = scoredEvents.maxOf { it.second }
+            val min = scoredEvents.minOf { it.second }
+            "min=${"%.3f".format(min)}, max=${"%.3f".format(max)}"
+        }
+        Log.d(
+            "TimelineContextSearch",
+            "query=\"$query\" total=${scoredEvents.size} $scoreRange top=$topMatches"
+        )
     }
 }

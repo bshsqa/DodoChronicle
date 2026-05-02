@@ -29,6 +29,10 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun getById(id: String): Event? = eventDao.getById(id)?.toDomain()
     override suspend fun insert(event: Event) = eventDao.insert(event.toEntity())
     override suspend fun insertAll(events: List<Event>) = eventDao.insertAll(events.map { it.toEntity() })
+    override suspend fun getAllTextEvents(childId: String): List<Event> =
+        eventDao.getAllTextEvents(childId).map { it.toDomain() }
+    override suspend fun updateTextEmbedding(id: String, textEmbeddingJson: String) =
+        eventDao.updateTextEmbedding(id, textEmbeddingJson)
     override suspend fun setFavorite(id: String, isFavorite: Boolean) = eventDao.setFavorite(id, isFavorite)
     override suspend fun setHidden(id: String, isHidden: Boolean) = eventDao.setHidden(id, isHidden)
     override fun observeHidden(childId: String): Flow<List<Event>> =
