@@ -32,7 +32,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -204,6 +208,8 @@ fun TimelineScreen(
                     GroupedTimelineContent(
                         events = state.events,
                         birthDate = state.birthDate,
+                        searchQuery = state.searchQuery,
+                        isContextSearch = state.isContextSearch,
                         onDayClick = { date -> selectedDetailDate = date },
                         modifier = Modifier.weight(1f)
                     )
@@ -290,6 +296,8 @@ fun TimelineScreen(
         DailyDetailDialog(
             date = detailDate,
             events = dayEvents,
+            searchQuery = state.searchQuery,
+            isContextSearch = state.isContextSearch,
             onDismiss = { selectedDetailDate = null },
             photoRecordsByEventId = state.photoRecordsByEventId,
             onDeleteBatch = { ids ->
@@ -855,6 +863,8 @@ private fun AddEventDialog(onDismiss: () -> Unit, onAdd: (LocalDate, EventCatego
 private fun GroupedTimelineContent(
     events: List<Event>,
     birthDate: LocalDate?,
+    searchQuery: String,
+    isContextSearch: Boolean,
     onDayClick: (LocalDate) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -870,6 +880,8 @@ private fun GroupedTimelineContent(
             DailyEventCard(
                 date = date,
                 events = dayEvents,
+                searchQuery = searchQuery,
+                isContextSearch = isContextSearch,
                 onClick = { onDayClick(date) }
             )
         }
@@ -880,6 +892,8 @@ private fun GroupedTimelineContent(
 private fun DailyEventCard(
     date: LocalDate,
     events: List<Event>,
+    searchQuery: String,
+    isContextSearch: Boolean,
     onClick: () -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
@@ -954,7 +968,11 @@ private fun DailyEventCard(
             // 텍스트 이벤트 요약
             texts.take(2).forEach { event ->
                 Text(
-                    "• ${event.content}",
+                    highlightedSearchAnnotatedString(
+                        text = "• ${event.content}",
+                        query = searchQuery,
+                        enabled = searchQuery.isNotBlank() && !isContextSearch
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -981,6 +999,8 @@ private fun DailyEventCard(
 private fun DailyDetailDialog(
     date: LocalDate,
     events: List<Event>,
+    searchQuery: String,
+    isContextSearch: Boolean,
     onDismiss: () -> Unit,
     photoRecordsByEventId: Map<String, PhotoRecord>,
     onDeleteBatch: (List<String>) -> Unit,
@@ -1185,11 +1205,17 @@ private fun DailyDetailDialog(
                                 border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(event.content,
+                            Text(
+                                highlightedSearchAnnotatedString(
+                                    text = event.content,
+                                    query = searchQuery,
+                                    enabled = searchQuery.isNotBlank() && !isContextSearch
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f),
                                 maxLines = 3,
-                                overflow = TextOverflow.Ellipsis)
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
@@ -1218,7 +1244,12 @@ private fun DailyDetailDialog(
     )
 
     selectedTextEvent?.let { event ->
-        EventDetailDialog(event = event, onDismiss = { selectedTextEvent = null })
+        EventDetailDialog(
+            event = event,
+            searchQuery = searchQuery,
+            isContextSearch = isContextSearch,
+            onDismiss = { selectedTextEvent = null }
+        )
     }
 }
 
@@ -1569,7 +1600,12 @@ private fun CategoryPill(category: EventCategory) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
+private fun EventDetailDialog(
+    event: Event,
+    searchQuery: String,
+    isContextSearch: Boolean,
+    onDismiss: () -> Unit
+) {
     val categoryColor = categoryColor(event.category)
     val categoryLabel = categoryLabel(event.category)
 
@@ -1596,7 +1632,15 @@ private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(event.content, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    highlightedSearchAnnotatedString(
+                        text = event.content,
+                        query = searchQuery,
+                        enabled = searchQuery.isNotBlank() && !isContextSearch
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         text = {
@@ -1604,7 +1648,11 @@ private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
                 if (!event.longContent.isNullOrBlank()) {
                     item {
                         Text(
-                            event.longContent,
+                            highlightedSearchAnnotatedString(
+                                text = event.longContent,
+                                query = searchQuery,
+                                enabled = searchQuery.isNotBlank() && !isContextSearch
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -1630,7 +1678,11 @@ private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    event.rawExcerpt,
+                                    highlightedSearchAnnotatedString(
+                                        text = event.rawExcerpt,
+                                        query = searchQuery,
+                                        enabled = searchQuery.isNotBlank() && !isContextSearch
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1644,6 +1696,78 @@ private fun EventDetailDialog(event: Event, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("닫기") }
         }
     )
+}
+
+@Composable
+private fun highlightedSearchAnnotatedString(
+    text: String,
+    query: String,
+    enabled: Boolean
+): AnnotatedString {
+    if (!enabled || text.isBlank()) return AnnotatedString(text)
+
+    val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
+    val highlightTextColor = MaterialTheme.colorScheme.onTertiaryContainer
+    val ranges = keywordHighlightRanges(text, query)
+    if (ranges.isEmpty()) return AnnotatedString(text)
+
+    return buildAnnotatedString {
+        var currentIndex = 0
+        for (range in ranges) {
+            if (currentIndex < range.first) {
+                append(text.substring(currentIndex, range.first))
+            }
+            withStyle(
+                SpanStyle(
+                    background = highlightColor,
+                    color = highlightTextColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+            ) {
+                append(text.substring(range.first, range.last + 1))
+            }
+            currentIndex = range.last + 1
+        }
+        if (currentIndex < text.length) {
+            append(text.substring(currentIndex))
+        }
+    }
+}
+
+private fun keywordHighlightRanges(text: String, query: String): List<IntRange> {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isBlank()) return emptyList()
+
+    val exactQuoteMatch = Regex("^\"(.+)\"$").find(normalizedQuery)
+    val keywords = if (exactQuoteMatch != null) {
+        listOf(exactQuoteMatch.groupValues[1]).filter { it.isNotBlank() }
+    } else {
+        normalizedQuery.split("\\s+".toRegex()).filter { it.isNotBlank() }
+    }
+    if (keywords.isEmpty()) return emptyList()
+
+    val ranges = mutableListOf<IntRange>()
+    for (keyword in keywords) {
+        var startIndex = 0
+        while (startIndex < text.length) {
+            val matchIndex = text.indexOf(keyword, startIndex, ignoreCase = true)
+            if (matchIndex < 0) break
+            ranges += matchIndex until (matchIndex + keyword.length)
+            startIndex = matchIndex + keyword.length
+        }
+    }
+
+    return ranges
+        .sortedBy { it.first }
+        .fold(mutableListOf()) { acc, range ->
+            val previous = acc.lastOrNull()
+            if (previous == null || range.first > previous.last + 1) {
+                acc += range
+            } else {
+                acc[acc.lastIndex] = previous.first..maxOf(previous.last, range.last)
+            }
+            acc
+        }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
