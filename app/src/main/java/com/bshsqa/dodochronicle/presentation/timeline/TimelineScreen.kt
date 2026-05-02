@@ -1017,26 +1017,21 @@ private fun DailyDetailDialog(
                     }
                 }
             } else {
-                Text(date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일")))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일")),
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onShowDevicePhotos) { Text("사진+") }
+                }
             }
         },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (!isSelectMode) {
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                date.format(DateTimeFormatter.ofPattern("yyyy. M. d.")),
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(onClick = onShowDevicePhotos) { Text("사진+") }
-                        }
-                    }
-                }
+                // 작은 날짜 및 사진+ 버튼 제거됨
                 // 사진 그리드
                 if (photos.isNotEmpty()) {
                     item {
@@ -1117,9 +1112,11 @@ private fun DailyDetailDialog(
 
                 // 텍스트 이벤트 목록
                 if (texts.isNotEmpty()) {
-                    item {
-                        HorizontalDivider()
-                        Spacer(Modifier.height(4.dp))
+                    if (photos.isNotEmpty()) {
+                        item {
+                            HorizontalDivider()
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
                     items(texts, key = { it.id }) { event ->
                         var showMenu by remember { mutableStateOf(false) }

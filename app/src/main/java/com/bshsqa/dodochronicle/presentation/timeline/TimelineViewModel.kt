@@ -395,10 +395,18 @@ class TimelineViewModel @Inject constructor(
     private fun queryTakenAt(uri: Uri): Long? {
         return context.contentResolver.query(
             uri,
-            arrayOf(MediaStore.Images.Media.DATE_TAKEN),
+            arrayOf(MediaStore.Images.Media.DATE_TAKEN, MediaStore.Images.Media.DATE_ADDED),
             null, null, null
         )?.use { c ->
-            if (!c.moveToFirst()) null else c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN))
+            if (!c.moveToFirst()) return@use null
+            val takenIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+            val addedIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+            
+            val taken = if (takenIdx >= 0) c.getLong(takenIdx) else 0L
+            if (taken > 0) return@use taken
+            
+            val added = if (addedIdx >= 0) c.getLong(addedIdx) else 0L
+            if (added > 0) added * 1000L else null
         }
     }
 
