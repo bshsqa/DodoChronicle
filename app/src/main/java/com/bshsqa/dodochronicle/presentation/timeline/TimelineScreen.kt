@@ -83,10 +83,20 @@ fun TimelineScreen(
     ) { uri ->
         uri?.let { viewModel.importKakao(it, kakaoImportAlias) }
     }
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia()
-    ) { uris ->
-        if (uris.isNotEmpty()) viewModel.addManualPhotos(uris)
+    val legacyPhotoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uris = mutableListOf<android.net.Uri>()
+            result.data?.clipData?.let { clipData ->
+                for (i in 0 until clipData.itemCount) {
+                    uris.add(clipData.getItemAt(i).uri)
+                }
+            } ?: result.data?.data?.let { uri ->
+                uris.add(uri)
+            }
+            if (uris.isNotEmpty()) viewModel.addManualPhotos(uris)
+        }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -118,9 +128,10 @@ fun TimelineScreen(
                         Icon(Icons.Default.Settings, contentDescription = "설정")
                     }
                     IconButton(onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
+                        val intent = android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+                            putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+                        }
+                        legacyPhotoPickerLauncher.launch(intent)
                     }) {
                         Icon(Icons.Default.AddPhotoAlternate, contentDescription = "사진 추가")
                     }
