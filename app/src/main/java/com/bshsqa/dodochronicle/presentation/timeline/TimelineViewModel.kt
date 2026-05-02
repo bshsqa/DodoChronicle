@@ -221,13 +221,19 @@ class TimelineViewModel @Inject constructor(
                             events
                         } else if (isContextSearch) {
                             val queryEmbedding = textEmbeddingEngine.getEmbedding(query)
-                            events.filter { event ->
-                                if (event.category == EventCategory.PHOTO) false
-                                else {
-                                    val emb = try { kotlinx.serialization.json.Json.decodeFromString<List<Float>>(event.textEmbeddingJson).toFloatArray() } catch(e:Exception){ floatArrayOf() }
-                                    com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.cosineSimilarity(queryEmbedding, emb) >= 0.65f
-                                }
+                            events.mapNotNull { event ->
+                                if (event.category == EventCategory.PHOTO) null else event
                             }
+                            .map { event ->
+                                val searchableText = buildContextSearchText(event)
+                                val eventEmbedding = textEmbeddingEngine.getEmbedding(searchableText)
+                                event to com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.cosineSimilarity(
+                                    queryEmbedding,
+                                    eventEmbedding
+                                )
+                            }
+                            .filter { (_, similarity) -> similarity >= 0.72f }
+                            .map { (event, _) -> event }
                         } else {
                             val keywords = query.split("\\s+".toRegex()).filter { it.isNotBlank() }
                             events.filter { event ->
@@ -663,5 +669,13 @@ class TimelineViewModel @Inject constructor(
             dataStore.edit { it.clear() }
             _state.update { it.copy(needsInit = true) }
         }
+    }
+
+    private fun buildContextSearchText(event: Event): String {
+        return listOfNotNull(
+            event.content.takeIf { it.isNotBlank() },
+            event.longContent?.takeIf { it.isNotBlank() },
+            event.rawExcerpt?.takeIf { it.isNotBlank() }
+        ).joinToString("\n")
     }
 }
