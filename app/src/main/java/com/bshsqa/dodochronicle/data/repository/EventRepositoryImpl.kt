@@ -68,7 +68,8 @@ class EventRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         longContent = longContent,
         rawExcerpt = rawExcerpt,
-        isHidden = isHidden
+        isHidden = isHidden,
+        textEmbeddingJson = textEmbeddingJson
     )
 
     private fun Event.toEntity() = EventEntity(
@@ -79,7 +80,8 @@ class EventRepositoryImpl @Inject constructor(
         source = source.name,
         longContent = longContent,
         rawExcerpt = rawExcerpt,
-        isHidden = isHidden
+        isHidden = isHidden,
+        textEmbeddingJson = textEmbeddingJson
     )
 
     private fun PhotoRecordEntity.toDomain() = PhotoRecord(

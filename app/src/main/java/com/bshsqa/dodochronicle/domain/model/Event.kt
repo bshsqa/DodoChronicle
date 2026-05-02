@@ -16,5 +16,6 @@ data class Event(
     val createdAt: Long = System.currentTimeMillis(),
     val longContent: String? = null,
     val rawExcerpt: String? = null,
-    val isHidden: Boolean = false
+    val isHidden: Boolean = false,
+    val textEmbeddingJson: String = "[]"
 )

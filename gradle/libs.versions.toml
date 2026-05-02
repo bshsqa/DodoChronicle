@@ -28,8 +28,9 @@ room = "2.7.0"
 # WorkManager
 work = "2.10.0"
 
-# ML Kit
+# ML Kit / MediaPipe
 mlkitFace = "16.1.7"
+mediapipeTasks = "0.10.14"
 
 # TFLite
 tfliteRuntime = "2.16.1"
@@ -100,8 +101,9 @@ room-compiler = { group = "androidx.room", name = "room-compiler", version.ref =
 # WorkManager
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 
-# ML Kit
+# ML Kit / MediaPipe
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFace" }
+mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasks" }
 
 # TFLite
 tflite-core = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tfliteRuntime" }

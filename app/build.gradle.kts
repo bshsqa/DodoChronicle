@@ -95,8 +95,9 @@ dependencies {
     // WorkManager
     implementation(libs.work.runtime.ktx)
 
-    // ML Kit
+    // ML Kit / MediaPipe
     implementation(libs.mlkit.face.detection)
+    implementation(libs.mediapipe.tasks.text)
 
     // TFLite
     implementation(libs.tflite.core)

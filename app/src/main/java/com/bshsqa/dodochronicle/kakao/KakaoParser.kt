@@ -19,6 +19,12 @@ class KakaoParser @Inject constructor() {
     // 날짜+시간만 있는 줄 — 모바일 포맷 첫 줄 또는 날짜 구분선
     private val dateOnlyPattern = Regex("""^\d{4}년 \d{1,2}월 \d{1,2}일 (?:오전|오후) \d{1,2}:\d{2}$""")
 
+    // 필터링 대상: <사진 읽지 않음>, 사진, 사진 N장, 동영상, 이미지 파일명 등
+    private val excludeContentPattern = Regex(
+        """^(<사진 읽지 않음>|<동영상 읽지 않음>|사진|사진 \d+장|동영상|이모티콘|[a-zA-Z0-9_.-]+\.(jpg|jpeg|png|gif|mp4|mov|avi))$""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun parse(content: String): ParsedResult {
         val lines = content.lines()
         val messages = mutableListOf<KakaoMessage>()
@@ -29,16 +35,18 @@ class KakaoParser @Inject constructor() {
         fun flush() {
             if (currentSentAt > 0 && currentContent.isNotEmpty()) {
                 val text = currentContent.toString().trim()
-                messages.add(
-                    KakaoMessage(
-                        id = UUID.randomUUID().toString(),
-                        roomId = "",
-                        sender = currentSender,
-                        sentAt = currentSentAt,
-                        content = text,
-                        contentHash = sha256("$currentSentAt|$text")
+                if (!excludeContentPattern.matches(text)) {
+                    messages.add(
+                        KakaoMessage(
+                            id = UUID.randomUUID().toString(),
+                            roomId = "",
+                            sender = currentSender,
+                            sentAt = currentSentAt,
+                            content = text,
+                            contentHash = sha256("$currentSentAt|$text")
+                        )
                     )
-                )
+                }
             }
             currentContent.clear()
         }

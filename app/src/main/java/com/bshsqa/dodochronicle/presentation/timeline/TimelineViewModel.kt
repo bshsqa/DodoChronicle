@@ -30,6 +30,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.Instant
@@ -83,7 +86,12 @@ data class TimelineUiState(
     val isScanRunning: Boolean = false,
     val hiddenTextEvents: List<Event> = emptyList(),
     val photoRecordsByEventId: Map<String, PhotoRecord> = emptyMap(),
-    val deviceDayPhotos: DeviceDayPhotos? = null
+    val deviceDayPhotos: DeviceDayPhotos? = null,
+    val searchQuery: String = "",
+    val isContextSearch: Boolean = false,
+    val isSearchDialogOpen: Boolean = false,
+    val searchDraftQuery: String = "",
+    val isContextSearchDraft: Boolean = false
 )
 
 @HiltViewModel
@@ -99,7 +107,8 @@ class TimelineViewModel @Inject constructor(
     private val scanStateHolder: ScanStateHolder,
     private val retryChunkRepository: RetryChunkRepository,
     private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    private val textEmbeddingEngine: com.bshsqa.dodochronicle.ml.TextEmbeddingEngine
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TimelineUiState())
@@ -201,8 +210,40 @@ class TimelineViewModel @Inject constructor(
                     .flatMapLatest { (cat, fav) ->
                         eventRepository.observe(childId, cat, fav)
                     }
-                    .collect { events ->
-                        _state.update { it.copy(events = events) }
+                    .combine(_state.map { it.searchQuery to it.isContextSearch }.distinctUntilChanged()) { events, searchState ->
+                        events to searchState
+                    }
+                    .mapLatest { (events, searchState) ->
+                        val (query, isContextSearch) = searchState
+                        if (query.isBlank()) {
+                            events
+                        } else if (isContextSearch) {
+                            val queryEmbedding = textEmbeddingEngine.getEmbedding(query)
+                            events.filter { event ->
+                                if (event.category == EventCategory.PHOTO) false
+                                else {
+                                    val emb = try { kotlinx.serialization.json.Json.decodeFromString<List<Float>>(event.textEmbeddingJson).toFloatArray() } catch(e:Exception){ floatArrayOf() }
+                                    com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.cosineSimilarity(queryEmbedding, emb) >= 0.65f
+                                }
+                            }
+                        } else {
+                            val keywords = query.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                            events.filter { event ->
+                                if (event.category == EventCategory.PHOTO) false
+                                else {
+                                    val fullText = "${event.content} ${event.longContent ?: ""} ${event.rawExcerpt ?: ""}"
+                                    val exactQuoteMatch = Regex("^\"(.+)\"$").find(query.trim())
+                                    if (exactQuoteMatch != null) {
+                                        fullText.contains(exactQuoteMatch.groupValues[1], ignoreCase = true)
+                                    } else {
+                                        keywords.all { kw -> fullText.contains(kw, ignoreCase = true) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .collect { filteredEvents ->
+                        _state.update { it.copy(events = filteredEvents) }
                     }
             }
 
@@ -313,8 +354,65 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun setSearchDraftQuery(query: String) {
+        _state.update { it.copy(searchDraftQuery = query) }
+    }
+
+    fun setSearchDraftContextSearch(isContextSearch: Boolean) {
+        _state.update { it.copy(isContextSearchDraft = isContextSearch) }
+    }
+
+    fun setSearchDialogOpen(isOpen: Boolean) {
+        _state.update {
+            if (isOpen) {
+                it.copy(
+                    isSearchDialogOpen = true,
+                    searchDraftQuery = it.searchQuery,
+                    isContextSearchDraft = it.isContextSearch
+                )
+            } else {
+                it.copy(isSearchDialogOpen = false)
+            }
+        }
+    }
+
+    fun executeSearch() {
+        _state.update {
+            val query = it.searchDraftQuery.trim()
+            if (query.isBlank()) {
+                it.copy(
+                    searchQuery = "",
+                    isSearchDialogOpen = false
+                )
+            } else {
+                it.copy(
+                    searchQuery = query,
+                    isContextSearch = it.isContextSearchDraft,
+                    isSearchDialogOpen = false
+                )
+            }
+        }
+    }
+
+    fun clearSearch() {
+        _state.update {
+            it.copy(
+                searchQuery = "",
+                isSearchDialogOpen = false,
+                searchDraftQuery = "",
+                isContextSearchDraft = false
+            )
+        }
+    }
+
     fun addManualEvent(date: LocalDate, category: EventCategory, content: String) {
         viewModelScope.launch {
+            val embeddingJson = if (category != EventCategory.PHOTO && content.isNotBlank()) {
+                val embedding = textEmbeddingEngine.getEmbedding(content)
+                val floatList: List<Float> = embedding.toList()
+                Json.encodeToString(ListSerializer(Float.serializer()), floatList)
+            } else "[]"
+            
             manageEventUseCase.addManual(
                 Event(
                     id = UUID.randomUUID().toString(),
@@ -322,7 +420,8 @@ class TimelineViewModel @Inject constructor(
                     date = date,
                     category = category,
                     content = content,
-                    source = EventSource.MANUAL
+                    source = EventSource.MANUAL,
+                    textEmbeddingJson = embeddingJson
                 )
             )
         }

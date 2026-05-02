@@ -127,6 +127,9 @@ fun TimelineScreen(
                     IconButton(onClick = { showSettingsMenu = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "설정")
                     }
+                    IconButton(onClick = { viewModel.setSearchDialogOpen(true) }) {
+                        Icon(Icons.Default.Search, contentDescription = "검색")
+                    }
                     IconButton(onClick = {
                         val intent = android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
                             putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
@@ -158,6 +161,35 @@ fun TimelineScreen(
                     selected = state.filterCategory,
                     onSelect = viewModel::setFilterCategory
                 )
+
+                // 검색 활성 시 필터링 안내 바너
+                if (state.searchQuery.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "검색 중: “${state.searchQuery}” ${if (state.isContextSearch) "(문맥)" else "(키워드)"} • ${state.events.size}건",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        IconButton(
+                            onClick = viewModel::clearSearch,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Clear,
+                                contentDescription = "검색 종료",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
 
                 if (state.pendingPhotos.isNotEmpty()) {
                     PendingPhotosBanner(
@@ -287,6 +319,18 @@ fun TimelineScreen(
             photos = currentFullscreenPhotos,
             initialIndex = fullscreenIndex,
             onDismiss = { fullscreenPhotos = null }
+        )
+    }
+
+    // 검색 다이얼로그
+    if (state.isSearchDialogOpen) {
+        TimelineSearchDialog(
+            query = state.searchDraftQuery,
+            isContextSearch = state.isContextSearchDraft,
+            onQueryChange = viewModel::setSearchDraftQuery,
+            onContextSearchChange = viewModel::setSearchDraftContextSearch,
+            onSearch = viewModel::executeSearch,
+            onDismiss = { viewModel.setSearchDialogOpen(false) }
         )
     }
 
@@ -1752,5 +1796,78 @@ private fun HiddenItemsDialog(
             ) { Text("복구") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("닫기") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimelineSearchDialog(
+    query: String,
+    isContextSearch: Boolean,
+    onQueryChange: (String) -> Unit,
+    onContextSearchChange: (Boolean) -> Unit,
+    onSearch: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Search, contentDescription = null) },
+        title = { Text("타임라인 검색") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    label = { Text("검색어 입력") },
+                    placeholder = { Text("예: 병원 방문, \"정확한 문구\"") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { onQueryChange("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "지우기")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = if (isContextSearch)
+                        "🔍 문맥 검색: 의미가 비슷한 이벤트를 찾습니다."
+                    else
+                        "🔤 키워드 검색: 모든 단어가 포함된 이벤트를 찾습니다.\n(\"따옴표\"로 묶으면 정확한 문구를 검색합니다.)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onContextSearchChange(!isContextSearch) }
+                ) {
+                    Switch(
+                        checked = isContextSearch,
+                        onCheckedChange = onContextSearchChange
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text("문맥 포함 (의미 기반 검색)", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "On-Device AI로 의미가 유사한 이벤트 검색",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSearch, enabled = query.isNotBlank()) {
+                Text("검색", color = if (query.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("닫기") }
+        }
     )
 }
