@@ -15,5 +15,6 @@ data class InitialScanSessionEntity(
     val completedAt: Long? = null,
     val totalCount: Int = 0,
     val processedCount: Int = 0,
-    val elapsedSeconds: Long = 0L
+    val elapsedSeconds: Long = 0L,
+    val lastCheckpointAt: Long = 0L
 )

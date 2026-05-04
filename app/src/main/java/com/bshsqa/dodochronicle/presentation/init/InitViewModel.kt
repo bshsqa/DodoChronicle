@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.data.local.db.dao.InitialScanDao
+import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanItemEntity
 import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanSessionEntity
 import com.bshsqa.dodochronicle.domain.model.Child
 import com.bshsqa.dodochronicle.domain.model.Event
@@ -85,7 +86,7 @@ class InitViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            restoreCompletedScanIfAny()
+            restoreOrResumeScanIfAny()
 
             stateHolder.state.collect { scanState ->
                 when (scanState) {
@@ -133,8 +134,50 @@ class InitViewModel @Inject constructor(
         }
     }
 
-    private suspend fun restoreCompletedScanIfAny() {
-        val session = initialScanDao.getLatestCompletedSession() ?: return
+    private suspend fun restoreOrResumeScanIfAny() {
+        val session = initialScanDao.getResumableSession() ?: return
+        val birthDate = runCatching { LocalDate.parse(session.birthDate) }.getOrNull()
+        val gender = runCatching { Gender.valueOf(session.gender) }.getOrNull()
+
+        if (session.status == "COMPLETED") {
+            restoreCompletedScan(session, birthDate, gender)
+            return
+        }
+
+        currentScanSessionId = session.id
+        _uiState.update {
+            it.copy(
+                step = InitStep.Scanning,
+                childName = session.childName,
+                birthDate = birthDate,
+                gender = gender,
+                referencePhotoUri = session.referencePhotoUri,
+                scannedCount = session.processedCount,
+                totalCount = session.totalCount,
+                scanElapsedSeconds = session.elapsedSeconds,
+                restoredScanResult = false,
+                error = null
+            )
+        }
+        context.startForegroundService(
+            Intent(context, ScanForegroundService::class.java).apply {
+                action = ScanForegroundService.ACTION_START
+                putExtra(ScanForegroundService.EXTRA_SESSION_ID, session.id)
+            }
+        )
+    }
+
+    private suspend fun restoreCompletedScan(
+        session: InitialScanSessionEntity,
+        birthDate: LocalDate?,
+        gender: Gender?
+    ) {
+        val itemRows = initialScanDao.getProcessedItems(session.id)
+        if (itemRows.isNotEmpty()) {
+            restoreCompletedScanFromItems(session, itemRows, birthDate, gender)
+            return
+        }
+
         val rows = initialScanDao.getEmbeddings(session.id)
         if (rows.isEmpty()) {
             initialScanDao.deleteSession(session.id)
@@ -165,8 +208,64 @@ class InitViewModel @Inject constructor(
             )
         }.sortedByDescending { it.count }
 
-        val birthDate = runCatching { LocalDate.parse(session.birthDate) }.getOrNull()
-        val gender = runCatching { Gender.valueOf(session.gender) }.getOrNull()
+        _uiState.update {
+            it.copy(
+                step = InitStep.ClusterSelect,
+                childName = session.childName,
+                birthDate = birthDate,
+                gender = gender,
+                referencePhotoUri = session.referencePhotoUri,
+                scannedCount = session.processedCount,
+                totalCount = session.totalCount,
+                scanElapsedSeconds = session.elapsedSeconds,
+                restoredScanResult = true,
+                clusters = restoredClusters,
+                selectedClusterIds = emptySet(),
+                error = null
+            )
+        }
+    }
+
+    private suspend fun restoreCompletedScanFromItems(
+        session: InitialScanSessionEntity,
+        rows: List<InitialScanItemEntity>,
+        birthDate: LocalDate?,
+        gender: Gender?
+    ) {
+        val grouped = rows.groupBy { it.clusterId ?: -1 }.filterKeys { it >= 0 }
+        _rawClusterPhotos = grouped.mapValues { (_, items) ->
+            items.mapNotNull { row ->
+                val embedding = runCatching {
+                    Json.decodeFromString<List<Float>>(row.embeddingJson).toFloatArray()
+                }.getOrNull() ?: return@mapNotNull null
+                PhotoEmbedding(row.uri, row.takenAt, embedding)
+            }
+        }.filterValues { it.isNotEmpty() }
+
+        if (_rawClusterPhotos.isEmpty()) {
+            clearInitialScanCache(session.id)
+            return
+        }
+
+        val previewUrisByCluster = initialScanDao.getClusters(session.id)
+            .associate { row ->
+                val uris = runCatching {
+                    Json.decodeFromString<List<String>>(row.representativeUrisJson)
+                }.getOrDefault(emptyList())
+                row.clusterId to uris
+            }
+
+        currentScanSessionId = session.id
+        val restoredClusters = _rawClusterPhotos.map { (clusterId, photos) ->
+            ClusterUiModel(
+                id = clusterId,
+                previewUris = previewUrisByCluster[clusterId].orEmpty().ifEmpty {
+                    photos.take(9).map { it.uri }
+                },
+                count = photos.size
+            )
+        }.sortedByDescending { it.count }
+
         _uiState.update {
             it.copy(
                 step = InitStep.ClusterSelect,
@@ -216,6 +315,8 @@ class InitViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             initialScanDao.deleteAllEmbeddings()
+            initialScanDao.deleteAllItems()
+            initialScanDao.deleteAllClusters()
             initialScanDao.deleteAllSessions()
             initialScanDao.upsertSession(
                 InitialScanSessionEntity(
@@ -361,6 +462,8 @@ class InitViewModel @Inject constructor(
 
     private suspend fun clearInitialScanCache(sessionId: String) {
         initialScanDao.deleteEmbeddings(sessionId)
+        initialScanDao.deleteItems(sessionId)
+        initialScanDao.deleteClusters(sessionId)
         initialScanDao.deleteSession(sessionId)
     }
 }

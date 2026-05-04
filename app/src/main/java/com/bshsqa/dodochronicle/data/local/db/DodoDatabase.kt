@@ -16,11 +16,13 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         RejectedPhotoEntity::class,
         InitialScanSessionEntity::class,
         InitialScanPhotoEmbeddingEntity::class,
+        InitialScanItemEntity::class,
+        InitialScanClusterEntity::class,
         KakaoRoomEntity::class,
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -173,6 +175,46 @@ abstract class DodoDatabase : RoomDatabase() {
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_sessionId ON initial_scan_photo_embeddings(sessionId)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_clusterId ON initial_scan_photo_embeddings(clusterId)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_uri ON initial_scan_photo_embeddings(uri)")
+            }
+        }
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE initial_scan_sessions ADD COLUMN lastCheckpointAt INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS initial_scan_items (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        sessionId TEXT NOT NULL,
+                        uri TEXT NOT NULL,
+                        takenAt INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        embeddingJson TEXT NOT NULL,
+                        clusterId INTEGER,
+                        errorMessage TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_sessionId ON initial_scan_items(sessionId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_status ON initial_scan_items(status)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_clusterId ON initial_scan_items(clusterId)")
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_initial_scan_items_sessionId_uri ON initial_scan_items(sessionId, uri)")
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS initial_scan_clusters (
+                        sessionId TEXT NOT NULL,
+                        clusterId INTEGER NOT NULL,
+                        embeddingSumJson TEXT NOT NULL,
+                        count INTEGER NOT NULL,
+                        representativeUrisJson TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        PRIMARY KEY(sessionId, clusterId)
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_clusters_sessionId ON initial_scan_clusters(sessionId)")
             }
         }
     }

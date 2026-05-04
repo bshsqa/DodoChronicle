@@ -35,7 +35,7 @@ android {
     buildTypes {
         debug {
             isDebuggable = true
-            buildConfigField("int", "PHOTO_SCAN_LIMIT", "30")
+            buildConfigField("int", "PHOTO_SCAN_LIMIT", "50")
             buildConfigField("String", "GEMINI_API_KEY", "\"${localProps["GEMINI_API_KEY"] ?: ""}\"")
         }
         release {
