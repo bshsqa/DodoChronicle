@@ -115,6 +115,7 @@ class ImportKakaoUseCase @Inject constructor(
                 var attempt = 0
                 var apiEvents = emptyList<ExtractedEvent>()
                 var apiTokens = 0
+                var apiRequestCount = 0
                 var apiSucceeded = false
 
                 while (attempt < 3 && !apiSucceeded) {
@@ -123,12 +124,13 @@ class ImportKakaoUseCase @Inject constructor(
                         delay(12000L)
                     }
                     try {
-                        val (events, tokens) = geminiClassifier.processChunk(
+                        val result = geminiClassifier.processChunk(
                             chunk, child.name, child.birthDate, child.gender
                         )
-                        apiEvents = events
-                        apiTokens = tokens
-                        if (tokens > 0 || events.isNotEmpty()) {
+                        apiEvents = result.events
+                        apiTokens = result.totalTokens
+                        apiRequestCount = result.requestCount
+                        if (result.requestCount > 0 && (result.totalTokens > 0 || result.events.isNotEmpty())) {
                             apiSucceeded = true
                         } else {
                             attempt++
@@ -164,7 +166,7 @@ class ImportKakaoUseCase @Inject constructor(
                     }
                     if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)
                     totalAddedEvents += eventList.size
-                    totalRequests++
+                    totalRequests += apiRequestCount
                     totalTokens += apiTokens
                 } else {
                     failedChunks++

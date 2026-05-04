@@ -66,11 +66,11 @@ class RetryFailedChunksUseCase @Inject constructor(
             }
 
             try {
-                val (events, tokens) = geminiClassifier.processChunk(
+                val result = geminiClassifier.processChunk(
                     messages, child.name, child.birthDate, child.gender
                 )
 
-                val eventList = events.map { extracted ->
+                val eventList = result.events.map { extracted ->
                     Event(
                         id = UUID.randomUUID().toString(),
                         childId = child.id,
@@ -90,13 +90,13 @@ class RetryFailedChunksUseCase @Inject constructor(
                 if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)
                 totalAddedEvents += eventList.size
 
-                if (tokens > 0 || events.isNotEmpty()) {
-                    totalRequests++
+                if (result.requestCount > 0 && (result.totalTokens > 0 || result.events.isNotEmpty())) {
+                    totalRequests += result.requestCount
                     retryChunkRepository.delete(listOf(retryChunk.id))
                 } else {
                     remainingFailedChunks++
                 }
-                totalTokens += tokens
+                totalTokens += result.totalTokens
 
             } catch (e: Exception) {
                 Log.e("RetryChunks", "Chunk retry failed: ${e.message}", e)

@@ -8,6 +8,10 @@ import com.bshsqa.dodochronicle.domain.model.KakaoMessage
 import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -46,6 +50,12 @@ data class ExtractionStats(
 
 data class ExtractionResult(val events: List<ExtractedEvent>, val stats: ExtractionStats)
 
+data class ChunkExtractionResult(
+    val events: List<ExtractedEvent>,
+    val totalTokens: Int,
+    val requestCount: Int
+)
+
 data class SearchContextBatchResult(
     val contextsByEventId: Map<String, EventSearchContext>,
     val tokens: Int
@@ -55,6 +65,19 @@ data class ChunkProgress(
     val chunkIndex: Int,
     val totalChunks: Int,
     val dateRange: String
+)
+
+private data class EventParseResult(
+    val events: List<ExtractedEvent>,
+    val brokenEvents: List<BrokenEvent>,
+    val totalTokens: Int,
+    val responseText: String,
+    val wholeJsonFailed: Boolean
+)
+
+private data class BrokenEvent(
+    val rawJson: String,
+    val reason: String
 )
 
 @Singleton
@@ -92,11 +115,11 @@ class GeminiEventClassifier @Inject constructor(
             }
             if (index > 0) delay(12000)
             try {
-                val (events, tokens) = processChunk(chunk, childName, birthDate, gender)
-                allEvents += events
-                totalTokens += tokens
-                if (tokens > 0 || events.isNotEmpty()) totalRequests++
-                else failedChunks++
+                val result = processChunk(chunk, childName, birthDate, gender)
+                allEvents += result.events
+                totalTokens += result.totalTokens
+                totalRequests += result.requestCount
+                if (result.requestCount == 0 && result.events.isEmpty()) failedChunks++
             } catch (e: Exception) {
                 Log.e("Gemini", "Chunk failed: ${e.message}", e)
                 failedChunks++
@@ -130,7 +153,7 @@ class GeminiEventClassifier @Inject constructor(
         childName: String,
         birthDate: LocalDate,
         gender: Gender
-    ): Pair<List<ExtractedEvent>, Int> = withContext(Dispatchers.IO) {
+    ): ChunkExtractionResult = withContext(Dispatchers.IO) {
         val chunkStartDate = Instant.ofEpochMilli(chunk.first().sentAt)
             .atZone(ZoneId.of("Asia/Seoul")).toLocalDate()
         val chunkEndDate = Instant.ofEpochMilli(chunk.last().sentAt)
@@ -147,34 +170,37 @@ class GeminiEventClassifier @Inject constructor(
         val prompt = buildPrompt(msgText, childName, birthDate, gender, chunkStartDate, chunkEndDate)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
-        val body = gson.toJson(
-            mapOf(
-                "contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt)))),
-                "generationConfig" to mapOf(
-                    "responseMimeType" to "application/json",
-                    "temperature" to 0.2,
-                    "maxOutputTokens" to 8192
-                )
+        val raw = executeGeminiRequest(url, prompt)
+            ?: return@withContext ChunkExtractionResult(emptyList(), 0, 0)
+        Log.d("Gemini", "Response: $raw")
+        val parsed = parseResponse(raw)
+        var repairTokens = 0
+        var repairRequests = 0
+        val repairedEvents = if (parsed.wholeJsonFailed || parsed.brokenEvents.isNotEmpty()) {
+            val repairPrompt = buildRepairPrompt(
+                originalMessages = msgText,
+                previousResponse = parsed.responseText.ifBlank { raw },
+                brokenEvents = parsed.brokenEvents,
+                wholeJsonFailed = parsed.wholeJsonFailed
             )
-        ).toRequestBody(json)
-
-        val request = Request.Builder().url(url).post(body).build()
-
-        httpClient.newCall(request).execute().use { response ->
-            val raw = response.body?.string()
-            if (!response.isSuccessful) {
-                Log.e("Gemini", "HTTP ${response.code}: $raw")
-                return@use Pair(emptyList(), 0)
+            delay(1_000L)
+            val repairRaw = executeGeminiRequest(url, repairPrompt)
+            if (repairRaw != null) {
+                repairRequests = 1
+                val repaired = parseResponse(repairRaw)
+                repairTokens = repaired.totalTokens
+                if (!repaired.wholeJsonFailed) repaired.events else emptyList()
+            } else {
+                emptyList()
             }
-            if (raw == null) {
-                Log.e("Gemini", "Empty response body")
-                return@use Pair(emptyList(), 0)
-            }
-            Log.d("Gemini", "Response: $raw")
-            val (events, tokens) = parseResponse(raw)
-            Log.d("Gemini", "Parsed ${events.size} events, $tokens tokens")
-            Pair(events, tokens)
+        } else {
+            emptyList()
         }
+        val events = parsed.events + repairedEvents
+        val totalTokens = parsed.totalTokens + repairTokens
+        val requestCount = 1 + repairRequests
+        Log.d("Gemini", "Parsed ${events.size} events, $totalTokens tokens, $requestCount requests")
+        ChunkExtractionResult(events, totalTokens, requestCount)
     }
 
     suspend fun generateSearchContexts(events: List<Event>): SearchContextBatchResult = withContext(Dispatchers.IO) {
@@ -203,6 +229,30 @@ class GeminiEventClassifier @Inject constructor(
                 return@use SearchContextBatchResult(emptyMap(), 0)
             }
             parseSearchContextResponse(raw)
+        }
+    }
+
+    private fun executeGeminiRequest(url: String, prompt: String): String? {
+        val body = gson.toJson(
+            mapOf(
+                "contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt)))),
+                "generationConfig" to mapOf(
+                    "responseMimeType" to "application/json",
+                    "temperature" to 0.2,
+                    "maxOutputTokens" to 8192
+                )
+            )
+        ).toRequestBody(json)
+
+        val request = Request.Builder().url(url).post(body).build()
+        return httpClient.newCall(request).execute().use { response ->
+            val raw = response.body?.string()
+            if (!response.isSuccessful || raw == null) {
+                Log.e("Gemini", "HTTP ${response.code}: $raw")
+                null
+            } else {
+                raw
+            }
         }
     }
 
@@ -296,22 +346,52 @@ $eventText
 """.trimIndent()
     }
 
+    private fun buildRepairPrompt(
+        originalMessages: String,
+        previousResponse: String,
+        brokenEvents: List<BrokenEvent>,
+        wholeJsonFailed: Boolean
+    ): String {
+        val brokenText = if (wholeJsonFailed) {
+            "The previous response could not be parsed as the required JSON array."
+        } else {
+            brokenEvents.joinToString("\n") { broken ->
+                "- reason=${broken.reason}, raw=${broken.rawJson}"
+            }
+        }
+        return """
+Repair the previous Gemini event extraction response.
+
+Return JSON array only. Do not add explanations.
+Use this exact event schema:
+[{"date":"YYYY-MM-DD","category":"SAID|DID|OTHER","content":"...","longContent":"...","rawExcerpt":"...","searchSummary":"...","searchTags":[],"searchAliases":[],"relatedKeywords":[]}]
+
+Rules:
+- Do not create unrelated new events.
+- Preserve the intent of the previous response when possible.
+- Use the original KakaoTalk messages only to fix invalid or missing required fields.
+- Drop events that cannot be repaired from the original messages.
+- Keep searchSummary within 80 Korean characters.
+- searchTags max 10, searchAliases max 5, relatedKeywords max 12.
+- If the problem is broken individual events, return only the repaired versions of those broken events.
+- If the problem is whole JSON parsing failure, return the full repaired event array.
+
+Problem:
+$brokenText
+
+Original KakaoTalk messages:
+$originalMessages
+
+Previous response:
+$previousResponse
+""".trimIndent()
+    }
+
     private data class GeminiResponse(val candidates: List<Candidate>?, val usageMetadata: UsageMetadata?)
     private data class Candidate(val content: Content?)
     private data class Content(val parts: List<Part>?)
     private data class Part(val text: String?)
     private data class UsageMetadata(val totalTokenCount: Int = 0)
-    private data class RawEvent(
-        @SerializedName("date") val date: String?,
-        @SerializedName("category") val category: String?,
-        @SerializedName("content") val content: String?,
-        @SerializedName("longContent") val longContent: String?,
-        @SerializedName("rawExcerpt") val rawExcerpt: String?,
-        @SerializedName("searchSummary") val searchSummary: String?,
-        @SerializedName("searchTags") val searchTags: List<String>?,
-        @SerializedName("searchAliases") val searchAliases: List<String>?,
-        @SerializedName("relatedKeywords") val relatedKeywords: List<String>?
-    )
     private data class RawSearchContextResponse(
         @SerializedName("items") val items: List<RawSearchContextItem>?
     )
@@ -323,37 +403,67 @@ $eventText
         @SerializedName("relatedKeywords") val relatedKeywords: List<String>?
     )
 
-    private fun parseResponse(raw: String): Pair<List<ExtractedEvent>, Int> {
+    private fun parseResponse(raw: String): EventParseResult {
         return try {
             val geminiRes = gson.fromJson(raw, GeminiResponse::class.java)
             val totalTokens = geminiRes.usageMetadata?.totalTokenCount ?: 0
             val text = geminiRes.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: return Pair(emptyList(), totalTokens)
-            val cleanText = text.trim().removePrefix("```json").removeSuffix("```").trim()
-            val rawEvents = gson.fromJson(cleanText, Array<RawEvent>::class.java)
-            val events = rawEvents.mapNotNull { r ->
-                try {
-                    ExtractedEvent(
-                        date = LocalDate.parse(r.date ?: return@mapNotNull null),
-                        category = when (r.category) {
-                            "SAID" -> EventCategory.SAID
-                            "DID" -> EventCategory.DID
-                            else -> EventCategory.OTHER
-                        },
-                        content = r.content ?: return@mapNotNull null,
-                        longContent = r.longContent?.takeIf { it.isNotBlank() },
-                        rawExcerpt = r.rawExcerpt?.takeIf { it.isNotBlank() },
-                        searchSummary = cleanSummary(r.searchSummary, r.content),
-                        searchTags = cleanTerms(r.searchTags, 10),
-                        searchAliases = cleanTerms(r.searchAliases, 5),
-                        relatedKeywords = cleanTerms(r.relatedKeywords, 12)
-                    )
-                } catch (e: Exception) { null }
+                ?: return EventParseResult(emptyList(), emptyList(), totalTokens, "", true)
+            val cleanText = cleanJsonText(text)
+            val jsonElement = try {
+                JsonParser.parseString(cleanText)
+            } catch (_: Exception) {
+                return EventParseResult(emptyList(), emptyList(), totalTokens, cleanText, true)
             }
-            Pair(events, totalTokens)
-        } catch (e: Exception) {
-            Pair(emptyList(), 0)
+            val eventArray = extractEventArray(jsonElement)
+                ?: return EventParseResult(emptyList(), emptyList(), totalTokens, cleanText, true)
+
+            val events = mutableListOf<ExtractedEvent>()
+            val brokenEvents = mutableListOf<BrokenEvent>()
+            eventArray.forEach { item ->
+                val obj = item.asJsonObjectOrNull()
+                if (obj == null) {
+                    brokenEvents += BrokenEvent(item.toString(), "event is not an object")
+                    return@forEach
+                }
+                val parsedEvent = parseEventObject(obj)
+                if (parsedEvent == null) {
+                    brokenEvents += BrokenEvent(obj.toString(), "required field is missing or invalid")
+                } else {
+                    events += parsedEvent
+                }
+            }
+            EventParseResult(events, brokenEvents, totalTokens, cleanText, false)
+        } catch (_: Exception) {
+            EventParseResult(emptyList(), emptyList(), 0, raw, true)
         }
+    }
+
+    private fun parseEventObject(obj: JsonObject): ExtractedEvent? {
+        val content = stringValue(obj.get("content"))?.takeIf { it.isNotBlank() } ?: return null
+        val dateText = stringValue(obj.get("date")) ?: return null
+        val date = try {
+            LocalDate.parse(dateText)
+        } catch (_: Exception) {
+            return null
+        }
+        val category = when (stringValue(obj.get("category"))) {
+            "SAID" -> EventCategory.SAID
+            "DID" -> EventCategory.DID
+            "OTHER", null -> EventCategory.OTHER
+            else -> EventCategory.OTHER
+        }
+        return ExtractedEvent(
+            date = date,
+            category = category,
+            content = content,
+            longContent = stringValue(obj.get("longContent"))?.takeIf { it.isNotBlank() },
+            rawExcerpt = stringValue(obj.get("rawExcerpt"))?.takeIf { it.isNotBlank() },
+            searchSummary = cleanSummary(stringValue(obj.get("searchSummary")), content),
+            searchTags = cleanTerms(obj.get("searchTags"), 10),
+            searchAliases = cleanTerms(obj.get("searchAliases"), 5),
+            relatedKeywords = cleanTerms(obj.get("relatedKeywords"), 12)
+        )
     }
 
     private fun parseSearchContextResponse(raw: String): SearchContextBatchResult {
@@ -362,7 +472,7 @@ $eventText
             val totalTokens = geminiRes.usageMetadata?.totalTokenCount ?: 0
             val text = geminiRes.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 ?: return SearchContextBatchResult(emptyMap(), totalTokens)
-            val cleanText = text.trim().removePrefix("```json").removeSuffix("```").trim()
+            val cleanText = cleanJsonText(text)
             val rawItems = gson.fromJson(cleanText, RawSearchContextResponse::class.java).items.orEmpty()
             val contexts = rawItems.mapNotNull { item ->
                 val eventId = item.eventId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -383,6 +493,64 @@ $eventText
     private fun cleanSummary(value: String?, fallback: String): String {
         val summary = value.orEmpty().trim().take(80)
         return summary.ifBlank { fallback.trim().take(80) }
+    }
+
+    private fun cleanTerms(element: JsonElement?, maxCount: Int): List<String> {
+        val values = when {
+            element == null || element.isJsonNull -> emptyList()
+            element.isJsonArray -> element.asJsonArray.mapNotNull { stringValue(it) }
+            element.isJsonPrimitive -> stringValue(element)
+                .orEmpty()
+                .split(",", "，", "/", "|")
+                .flatMap { part -> part.split("\\s+".toRegex()) }
+            else -> emptyList()
+        }
+        return cleanTerms(values, maxCount)
+    }
+
+    private fun cleanJsonText(text: String): String {
+        val trimmed = text.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+        val firstArray = trimmed.indexOf('[')
+        val lastArray = trimmed.lastIndexOf(']')
+        if (firstArray >= 0 && lastArray > firstArray) {
+            return trimmed.substring(firstArray, lastArray + 1)
+        }
+        val firstObject = trimmed.indexOf('{')
+        val lastObject = trimmed.lastIndexOf('}')
+        return if (firstObject >= 0 && lastObject > firstObject) {
+            trimmed.substring(firstObject, lastObject + 1)
+        } else {
+            trimmed
+        }
+    }
+
+    private fun extractEventArray(element: JsonElement): JsonArray? {
+        if (element.isJsonArray) return element.asJsonArray
+        val obj = element.asJsonObjectOrNull() ?: return null
+        return listOf("events", "items", "data")
+            .firstNotNullOfOrNull { key -> obj.get(key)?.takeIf { it.isJsonArray }?.asJsonArray }
+    }
+
+    private fun JsonElement.asJsonObjectOrNull(): JsonObject? =
+        if (isJsonObject) asJsonObject else null
+
+    private fun stringValue(element: JsonElement?): String? {
+        if (element == null || element.isJsonNull || !element.isJsonPrimitive) return null
+        val primitive = element.asJsonPrimitive
+        return try {
+            when {
+                primitive.isString -> primitive.asString
+                primitive.isNumber -> primitive.asNumber.toString()
+                primitive.isBoolean -> primitive.asBoolean.toString()
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun cleanTerms(values: List<String>?, maxCount: Int): List<String> {
