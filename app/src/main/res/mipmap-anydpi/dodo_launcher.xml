@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/dodo_launcher_background" />
-    <foreground android:drawable="@drawable/dodo_launcher_icon" />
-    <monochrome android:drawable="@drawable/dodo_launcher_icon" />
+    <foreground android:drawable="@drawable/dodo_icon" />
+    <monochrome android:drawable="@drawable/dodo_icon" />
 </adaptive-icon>

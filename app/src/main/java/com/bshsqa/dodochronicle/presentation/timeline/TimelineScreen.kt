@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -136,11 +137,12 @@ fun TimelineScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Image(
-                            painter = painterResource(R.drawable.dodo_child_mark),
+                            painter = painterResource(R.drawable.dodo_name),
                             contentDescription = null,
                             modifier = Modifier
                                 .size(30.dp)
-                                .clip(RoundedCornerShape(9.dp))
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
                         )
                         Text(state.childName.ifBlank { "DodoChronicle" })
                     }
@@ -331,11 +333,12 @@ fun TimelineScreen(
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
                         Image(
-                            painter = painterResource(R.drawable.dodo_loading_mark),
+                            painter = painterResource(R.drawable.dodo_loading),
                             contentDescription = null,
                             modifier = Modifier
                                 .size(76.dp)
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(30.dp)),
+                            contentScale = ContentScale.Crop
                         )
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
@@ -393,11 +396,12 @@ fun TimelineScreen(
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
                         Image(
-                            painter = painterResource(R.drawable.dodo_loading_mark),
+                            painter = painterResource(R.drawable.dodo_loading),
                             contentDescription = null,
                             modifier = Modifier
                                 .size(76.dp)
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(30.dp)),
+                            contentScale = ContentScale.Crop
                         )
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
