@@ -250,6 +250,7 @@ fun TimelineScreen(
                         birthDate = state.birthDate,
                         searchQuery = state.searchQuery,
                         isContextSearch = state.isContextSearch,
+                        contextSearchSort = state.contextSearchSort,
                         onDayClick = { date -> selectedDetailDate = date },
                         modifier = Modifier.weight(1f)
                     )
@@ -909,18 +910,25 @@ private fun GroupedTimelineContent(
     birthDate: LocalDate?,
     searchQuery: String,
     isContextSearch: Boolean,
+    contextSearchSort: ContextSearchSort,
     onDayClick: (LocalDate) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val grouped = remember(events) { events.groupBy { it.date }.toSortedMap(compareByDescending { it }) }
+    val grouped = remember(events, isContextSearch, contextSearchSort) {
+        val byDate = events.groupBy { it.date }
+        if (isContextSearch && contextSearchSort == ContextSearchSort.RELEVANCE) {
+            byDate.entries.toList()
+        } else {
+            byDate.entries.sortedByDescending { it.key }
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(grouped.keys.toList(), key = { it.toString() }) { date ->
-            val dayEvents = grouped[date] ?: emptyList()
+        items(grouped, key = { it.key.toString() }) { (date, dayEvents) ->
             DailyEventCard(
                 date = date,
                 events = dayEvents,
