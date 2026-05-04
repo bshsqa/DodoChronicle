@@ -84,6 +84,7 @@ private const val PHOTO_SYNC_OVERLAP_SECONDS = 86_400L
 
 data class TimelineUiState(
     val childName: String = "",
+    val childReferencePhotoUri: String = "",
     val birthDate: LocalDate? = null,
     val events: List<Event> = emptyList(),
     val filterCategory: EventCategory? = null,
@@ -159,7 +160,13 @@ class TimelineViewModel @Inject constructor(
                 return@launch
             }
             childId = child.id
-            _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
+            _state.update {
+                it.copy(
+                    childName = child.name,
+                    childReferencePhotoUri = child.referencePhotoUri,
+                    birthDate = child.birthDate
+                )
+            }
 
             launch {
                 geminiSettingsRepository.settingsFlow.collect { settings ->
@@ -1038,6 +1045,23 @@ class TimelineViewModel @Inject constructor(
         geminiApiKeyConfigured && selectedGeminiModelId.isNotBlank()
 
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
+
+    fun updateChildReferencePhoto(uri: String) {
+        viewModelScope.launch {
+            val child = childRepository.getFirst()
+            if (child == null) {
+                _state.update { it.copy(snackbar = "아이 정보를 찾을 수 없습니다.") }
+                return@launch
+            }
+            childRepository.save(child.copy(referencePhotoUri = uri))
+            _state.update {
+                it.copy(
+                    childReferencePhotoUri = uri,
+                    snackbar = "대표 사진을 변경했습니다."
+                )
+            }
+        }
+    }
 
     fun resetApp() {
         viewModelScope.launch {

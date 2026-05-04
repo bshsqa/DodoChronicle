@@ -148,6 +148,11 @@ fun TimelineScreen(
             }
         }
     }
+    val childProfilePhotoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.updateChildReferencePhoto(it.toString()) }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -550,6 +555,9 @@ fun TimelineScreen(
 
     if (showSettingsMenu) {
         SettingsMenuDialog(
+            childName = state.childName,
+            childReferencePhotoUri = state.childReferencePhotoUri,
+            onChangeChildPhoto = { childProfilePhotoLauncher.launch("image/*") },
             pendingRetryCount = state.pendingRetryRooms.sumOf { it.chunkCount },
             pendingPhotoCount = state.pendingPhotos.size,
             onKakaoImport = {
@@ -2130,6 +2138,9 @@ private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit, onRet
 
 @Composable
 private fun SettingsMenuDialog(
+    childName: String,
+    childReferencePhotoUri: String,
+    onChangeChildPhoto: () -> Unit,
     pendingRetryCount: Int,
     pendingPhotoCount: Int,
     onKakaoImport: () -> Unit,
@@ -2161,6 +2172,49 @@ private fun SettingsMenuDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(86.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onChangeChildPhoto() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (childReferencePhotoUri.isNotBlank()) {
+                            AsyncImage(
+                                model = childReferencePhotoUri,
+                                contentDescription = "대표 사진 변경",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.AddAPhoto,
+                                contentDescription = "대표 사진 추가",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        childName.ifBlank { "DodoChronicle" },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "사진을 눌러 대표 사진 변경",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                HorizontalDivider()
                 TextButton(
                     onClick = onKakaoImport,
                     modifier = Modifier.fillMaxWidth(),
