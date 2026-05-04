@@ -25,7 +25,8 @@ object DatabaseModule {
                 DodoDatabase.MIGRATION_4_5,
                 DodoDatabase.MIGRATION_5_6,
                 DodoDatabase.MIGRATION_6_7,
-                DodoDatabase.MIGRATION_7_8
+                DodoDatabase.MIGRATION_7_8,
+                DodoDatabase.MIGRATION_8_9
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -33,6 +34,7 @@ object DatabaseModule {
     @Provides fun provideChildDao(db: DodoDatabase) = db.childDao()
     @Provides fun provideEventDao(db: DodoDatabase) = db.eventDao()
     @Provides fun providePhotoRecordDao(db: DodoDatabase) = db.photoRecordDao()
+    @Provides fun providePendingPhotoDao(db: DodoDatabase) = db.pendingPhotoDao()
     @Provides fun provideKakaoRoomDao(db: DodoDatabase) = db.kakaoRoomDao()
     @Provides fun provideKakaoMessageDao(db: DodoDatabase) = db.kakaoMessageDao()
     @Provides fun provideRetryChunkDao(db: DodoDatabase) = db.retryChunkDao()

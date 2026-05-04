@@ -15,6 +15,7 @@ import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
+import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
@@ -24,6 +25,7 @@ import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.RetryFailedChunksUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
+import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PhotoCandidate
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
 import com.bshsqa.dodochronicle.service.ImportState
 import com.bshsqa.dodochronicle.service.ImportStateHolder
@@ -73,16 +75,20 @@ data class DeviceDayPhotos(
     val uris: List<String>
 )
 
+private const val PHOTO_SYNC_OVERLAP_SECONDS = 86_400L
+
 data class TimelineUiState(
     val childName: String = "",
     val birthDate: LocalDate? = null,
     val events: List<Event> = emptyList(),
     val filterCategory: EventCategory? = null,
     val onlyFavorite: Boolean = false,
-    val pendingPhotos: List<SyncNewPhotosUseCase.PendingPhoto> = emptyList(),
+    val pendingPhotos: List<PendingPhoto> = emptyList(),
     val kakaoRooms: List<KakaoRoom> = emptyList(),
     val snackbar: String? = null,
     val isLoading: Boolean = false,
+    val isPhotoSyncRunning: Boolean = false,
+    val pendingDialogRequestId: Int = 0,
     val importProgress: ImportProgress? = null,
     val importDone: ImportDoneInfo? = null,
     val needsInit: Boolean = false,
@@ -127,6 +133,8 @@ class TimelineViewModel @Inject constructor(
     // roomId of the most recently imported room, kept for immediate retry from ImportDoneOverlay
     private var lastImportRoomId: String? = null
     private var lastImportAlias: String = ""
+    private var photoSyncInProgress: Boolean = false
+    private var hasObservedPendingPhotos: Boolean = false
 
     init {
         viewModelScope.launch {
@@ -138,7 +146,7 @@ class TimelineViewModel @Inject constructor(
             childId = child.id
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
 
-            launch { syncNewPhotos() }
+            launch { syncNewPhotos(manual = false) }
 
             launch {
                 kakaoRepository.observeRooms().collect { rooms ->
@@ -271,6 +279,25 @@ class TimelineViewModel @Inject constructor(
             }
 
             launch {
+                eventRepository.observePendingPhotosForChild(childId).collect { pending ->
+                    _state.update {
+                        val shouldNotify = hasObservedPendingPhotos &&
+                            pending.size > it.pendingPhotos.size &&
+                            !it.isPhotoSyncRunning
+                        hasObservedPendingPhotos = true
+                        it.copy(
+                            pendingPhotos = pending,
+                            snackbar = if (shouldNotify) {
+                                "확인 필요한 사진이 있습니다"
+                            } else {
+                                it.snackbar
+                            }
+                        )
+                    }
+                }
+            }
+
+            launch {
                 eventRepository.observeHidden(childId).collect { events ->
                     _state.update {
                         it.copy(hiddenTextEvents = events.filter { e -> e.category != EventCategory.PHOTO })
@@ -280,46 +307,110 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    private suspend fun syncNewPhotos() {
+    private suspend fun syncNewPhotos(manual: Boolean) {
         try {
-            val lastPhotoTakenAt = eventRepository.getLatestPhotoTakenAt() ?: 0L
-            val initialCutoffAt = dataStore.data.first()[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] ?: 0L
-            val syncAfter = maxOf(lastPhotoTakenAt, initialCutoffAt)
+            if (photoSyncInProgress) return
+            photoSyncInProgress = true
+            if (manual) {
+                _state.update { it.copy(isPhotoSyncRunning = true) }
+            }
+
+            val prefs = dataStore.data.first()
+            val lastAddedAt = prefs[AppPrefsKeys.LAST_PHOTO_SYNC_ADDED_AT_SECONDS] ?: 0L
+            val initialCutoffAt = (prefs[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] ?: 0L) / 1000L
+            val syncAfter = maxOf(lastAddedAt, initialCutoffAt)
             val newPhotos = queryNewPhotos(syncAfter)
-            if (newPhotos.isEmpty()) return
+            if (newPhotos.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        isPhotoSyncRunning = false,
+                        snackbar = if (manual) "새로 추가할 사진이 없습니다" else it.snackbar
+                    )
+                }
+                photoSyncInProgress = false
+                return
+            }
+
+            var finalProgress: SyncNewPhotosUseCase.SyncProgress? = null
 
             syncUseCase.invoke(newPhotos).collect { progress ->
-                _state.update { it.copy(pendingPhotos = progress.needsConfirmation) }
+                finalProgress = progress
             }
+            val maxAddedAt = newPhotos.maxOfOrNull { it.addedAtSeconds } ?: 0L
+            if (maxAddedAt > 0L) {
+                dataStore.edit { editPrefs ->
+                    editPrefs[AppPrefsKeys.LAST_PHOTO_SYNC_ADDED_AT_SECONDS] = maxAddedAt
+                }
+            }
+
+            val progress = finalProgress
+            val pendingCount = progress?.needsConfirmation?.size ?: 0
+            val autoAdded = progress?.autoAdded ?: 0
+            _state.update {
+                it.copy(
+                    isPhotoSyncRunning = false,
+                    pendingDialogRequestId = if (manual && pendingCount > 0) {
+                        it.pendingDialogRequestId + 1
+                    } else {
+                        it.pendingDialogRequestId
+                    },
+                    snackbar = buildPhotoSyncSnackbar(autoAdded, pendingCount, manual)
+                )
+            }
+            photoSyncInProgress = false
         } catch (_: Exception) {
-            // Sync failure is non-fatal; pending photos remain empty
+            _state.update {
+                it.copy(
+                    isPhotoSyncRunning = false,
+                    snackbar = if (manual) "사진 로딩에 실패했습니다" else it.snackbar
+                )
+            }
+            photoSyncInProgress = false
         }
     }
 
-    private fun queryNewPhotos(after: Long): List<Pair<String, Long>> {
-        val uris = mutableListOf<Pair<String, Long>>()
+    private fun queryNewPhotos(afterAddedAtSeconds: Long): List<PhotoCandidate> {
+        val uris = mutableListOf<PhotoCandidate>()
         val limit = BuildConfig.PHOTO_SCAN_LIMIT
+        val queryStart = (afterAddedAtSeconds - PHOTO_SYNC_OVERLAP_SECONDS).coerceAtLeast(0L)
 
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_TAKEN),
-            "${MediaStore.Images.Media.DATE_TAKEN} > ?",
-            arrayOf(after.toString()),
-            "${MediaStore.Images.Media.DATE_TAKEN} DESC"
+            arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Images.Media.DATE_ADDED
+            ),
+            "${MediaStore.Images.Media.DATE_ADDED} >= ?",
+            arrayOf(queryStart.toString()),
+            "${MediaStore.Images.Media.DATE_ADDED} DESC"
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
             var count = 0
             while (cursor.moveToNext() && (limit < 0 || count < limit)) {
                 val id = cursor.getLong(idCol)
-                val taken = cursor.getLong(dateCol)
+                val taken = cursor.getLong(takenCol)
+                val added = cursor.getLong(addedCol)
                 val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                uris.add(uri.toString() to taken)
+                val takenAt = if (taken > 0L) taken else added * 1000L
+                if (added > 0L && takenAt > 0L) {
+                    uris.add(PhotoCandidate(uri.toString(), takenAt, added))
+                }
                 count++
             }
         }
         return uris
     }
+
+    private fun buildPhotoSyncSnackbar(autoAdded: Int, pendingCount: Int, manual: Boolean): String? =
+        when {
+            autoAdded > 0 -> "${autoAdded}장 사진을 자동 추가했습니다"
+            manual && pendingCount > 0 -> "확인 필요한 사진이 있습니다"
+            manual -> "새로 추가할 사진이 없습니다"
+            else -> null
+        }
 
     fun setFilterCategory(category: EventCategory?) {
         _filterCategory.value = category
@@ -629,13 +720,10 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    fun confirmPendingPhoto(pending: SyncNewPhotosUseCase.PendingPhoto, accept: Boolean) {
+    fun confirmPendingPhoto(pending: PendingPhoto, accept: Boolean) {
         viewModelScope.launch {
             syncUseCase.confirmPhoto(pending, accept, childId)
             if (accept) updateEmbeddingUseCase(childId)
-            _state.update { s ->
-                s.copy(pendingPhotos = s.pendingPhotos.filter { it.uri != pending.uri })
-            }
         }
     }
 
@@ -654,18 +742,14 @@ class TimelineViewModel @Inject constructor(
 
             if (accepted.isNotEmpty()) updateEmbeddingUseCase(childId)
 
-            _state.update { s ->
-                val processedUris = acceptedUris + rejectedUris
-                s.copy(pendingPhotos = s.pendingPhotos.filter { it.uri !in processedUris })
-            }
+            eventRepository.deletePendingPhotos(rejected.map { it.uri })
         }
     }
 
     fun startManualScan() {
-        val intent = Intent(context, ScanForegroundService::class.java).apply {
-            action = ScanForegroundService.ACTION_START
+        viewModelScope.launch {
+            syncNewPhotos(manual = true)
         }
-        androidx.core.content.ContextCompat.startForegroundService(context, intent)
     }
 
     fun updateSearchContexts() {
@@ -748,6 +832,7 @@ class TimelineViewModel @Inject constructor(
         viewModelScope.launch {
             if (childId.isNotEmpty()) {
                 eventRepository.deleteAllForChild(childId)
+                eventRepository.deleteAllPendingPhotosForChild(childId)
             }
             eventRepository.deleteAllPhotoRecords()
             childRepository.deleteAll()

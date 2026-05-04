@@ -5,6 +5,7 @@ import android.net.Uri
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
@@ -36,26 +37,22 @@ class SyncNewPhotosUseCase @Inject constructor(
         val needsConfirmation: List<PendingPhoto>
     )
 
-    data class PendingPhoto(
-        val uri: String,
-        val takenAt: Long,
-        val similarity: Float,
-        val faceEmbedding: FloatArray
-    )
-
-    fun invoke(newPhotoUris: List<Pair<String, Long>>): Flow<SyncProgress> = flow {
+    fun invoke(newPhotoUris: List<PhotoCandidate>): Flow<SyncProgress> = flow {
         val child = childRepository.getFirst() ?: return@flow
         if (child.faceEmbeddings.isEmpty()) return@flow
 
         val existingUris = eventRepository.getAllPhotoUris().toSet()
-        val toProcess = newPhotoUris.filter { (uri, _) -> uri !in existingUris }
+        val pendingUris = eventRepository.getAllPendingPhotoUris().toSet()
+        val toProcess = newPhotoUris.filter { candidate ->
+            candidate.uri !in existingUris && candidate.uri !in pendingUris
+        }
 
         var processed = 0
         var autoAdded = 0
         val needsConfirmation = mutableListOf<PendingPhoto>()
 
-        for ((uri, takenAt) in toProcess) {
-            val bitmap = loadBitmap(uri) ?: run {
+        for (candidate in toProcess) {
+            val bitmap = loadBitmap(candidate.uri) ?: run {
                 processed++
                 emit(SyncProgress(processed, toProcess.size, autoAdded, needsConfirmation.toList()))
                 continue
@@ -78,11 +75,19 @@ class SyncNewPhotosUseCase @Inject constructor(
 
             when {
                 maxSimilarity >= AUTO_ADD_THRESHOLD -> {
-                    savePhotoEvent(child.id, uri, takenAt, embedding, maxSimilarity)
+                    savePhotoEvent(child.id, candidate.uri, candidate.takenAt, embedding, maxSimilarity)
                     autoAdded++
                 }
                 maxSimilarity >= AUTO_SKIP_THRESHOLD -> {
-                    needsConfirmation.add(PendingPhoto(uri, takenAt, maxSimilarity, embedding))
+                    val pending = PendingPhoto(
+                        uri = candidate.uri,
+                        takenAt = candidate.takenAt,
+                        addedAtSeconds = candidate.addedAtSeconds,
+                        similarity = maxSimilarity,
+                        faceEmbedding = embedding
+                    )
+                    needsConfirmation.add(pending)
+                    eventRepository.upsertPendingPhotos(child.id, listOf(pending))
                 }
                 // < AUTO_SKIP_THRESHOLD: 완전히 다른 사람 — 조용히 skip
             }
@@ -96,6 +101,7 @@ class SyncNewPhotosUseCase @Inject constructor(
         if (accept) {
             savePhotoEvent(childId, pending.uri, pending.takenAt, pending.faceEmbedding, pending.similarity)
         }
+        eventRepository.deletePendingPhotos(listOf(pending.uri))
     }
 
     private suspend fun savePhotoEvent(
@@ -135,4 +141,10 @@ class SyncNewPhotosUseCase @Inject constructor(
     } catch (e: Exception) {
         null
     }
+
+    data class PhotoCandidate(
+        val uri: String,
+        val takenAt: Long,
+        val addedAtSeconds: Long = 0L
+    )
 }

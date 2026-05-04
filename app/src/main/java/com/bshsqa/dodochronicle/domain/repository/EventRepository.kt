@@ -3,6 +3,7 @@ package com.bshsqa.dodochronicle.domain.repository
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSearchContext
+import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import kotlinx.coroutines.flow.Flow
 
@@ -33,6 +34,11 @@ interface EventRepository {
     suspend fun deletePhotoRecord(id: String)
     suspend fun deletePhotoRecordsBatch(ids: List<String>)
     suspend fun getAllPhotoUris(): List<String>
+    suspend fun getAllPendingPhotoUris(): List<String>
+    fun observePendingPhotosForChild(childId: String): Flow<List<PendingPhoto>>
+    suspend fun upsertPendingPhotos(childId: String, photos: List<PendingPhoto>)
+    suspend fun deletePendingPhotos(uris: List<String>)
+    suspend fun deleteAllPendingPhotosForChild(childId: String)
     suspend fun deleteAllPhotoRecords()
     suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean)
     suspend fun getLatest50Embeddings(childId: String): List<FloatArray>

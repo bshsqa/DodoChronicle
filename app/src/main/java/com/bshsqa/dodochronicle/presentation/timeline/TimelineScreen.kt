@@ -46,6 +46,7 @@ import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
+import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -75,6 +76,7 @@ fun TimelineScreen(
     var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var showHiddenItemsDialog by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -114,14 +116,17 @@ fun TimelineScreen(
         }
     }
 
+    LaunchedEffect(state.pendingDialogRequestId) {
+        if (state.pendingDialogRequestId > 0 && state.pendingPhotos.isNotEmpty()) {
+            showPendingDialog = true
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(state.childName.ifBlank { "DodoChronicle" }) },
                 actions = {
-                    IconButton(onClick = { showKakaoMenu = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "카카오 import")
-                    }
                     IconButton(onClick = viewModel::toggleFavoriteFilter) {
                         Icon(
                             if (state.onlyFavorite) Icons.Default.Star else Icons.Default.StarBorder,
@@ -130,19 +135,11 @@ fun TimelineScreen(
                             else MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    IconButton(onClick = { showSettingsMenu = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "설정")
-                    }
                     IconButton(onClick = { viewModel.setSearchDialogOpen(true) }) {
                         Icon(Icons.Default.Search, contentDescription = "검색")
                     }
-                    IconButton(onClick = {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-                            putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
-                        }
-                        legacyPhotoPickerLauncher.launch(intent)
-                    }) {
-                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = "사진 추가")
+                    IconButton(onClick = { showSettingsMenu = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "설정")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -151,12 +148,41 @@ fun TimelineScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "이벤트 추가",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Box {
+                FloatingActionButton(
+                    onClick = { showAddMenu = true },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "추가",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                DropdownMenu(
+                    expanded = showAddMenu,
+                    onDismissRequest = { showAddMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("사진 추가") },
+                        leadingIcon = { Icon(Icons.Default.AddPhotoAlternate, contentDescription = null) },
+                        onClick = {
+                            showAddMenu = false
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_PICK,
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            ).apply {
+                                putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                            legacyPhotoPickerLauncher.launch(intent)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("텍스트 이벤트 추가") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            showAddMenu = false
+                            showAddDialog = true
+                        }
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -270,7 +296,8 @@ fun TimelineScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f)),
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .consumeAllPointers(),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -316,6 +343,35 @@ fun TimelineScreen(
                                 contentColor = MaterialTheme.colorScheme.error
                             )
                         ) { Text("취소") }
+                    }
+                }
+            }
+
+            if (state.isPhotoSyncRunning) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.25f))
+                        .consumeAllPointers(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .background(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 32.dp, vertical = 24.dp)
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "신규 사진 분석 중...",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -409,6 +465,11 @@ fun TimelineScreen(
     if (showSettingsMenu) {
         SettingsMenuDialog(
             pendingRetryCount = state.pendingRetryRooms.sumOf { it.chunkCount },
+            pendingPhotoCount = state.pendingPhotos.size,
+            onKakaoImport = {
+                showSettingsMenu = false
+                showKakaoMenu = true
+            },
             onRetry = {
                 showSettingsMenu = false
                 showRetryRoomDialog = true
@@ -417,7 +478,11 @@ fun TimelineScreen(
                 showSettingsMenu = false
                 viewModel.startManualScan()
             },
-            isScanRunning = state.isScanRunning,
+            isScanRunning = state.isPhotoSyncRunning,
+            onPendingPhotos = {
+                showSettingsMenu = false
+                showPendingDialog = true
+            },
             onHiddenItems = {
                 showSettingsMenu = false
                 showHiddenItemsDialog = true
@@ -603,6 +668,14 @@ private fun generateLabelDates(start: LocalDate, end: LocalDate, zoom: ZoomLevel
     return dates
 }
 
+private fun Modifier.consumeAllPointers(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent()
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EventCard(
@@ -750,7 +823,7 @@ private fun PendingPhotosBanner(count: Int, onClick: () -> Unit) {
 
 @Composable
 private fun PendingPhotosDialog(
-    photos: List<com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PendingPhoto>,
+    photos: List<PendingPhoto>,
     onDismiss: () -> Unit,
     onConfirm: (Set<String>, Set<String>) -> Unit
 ) {
@@ -1505,9 +1578,12 @@ private fun ImportDoneOverlay(info: ImportDoneInfo, onConfirm: () -> Unit, onRet
 @Composable
 private fun SettingsMenuDialog(
     pendingRetryCount: Int,
+    pendingPhotoCount: Int,
+    onKakaoImport: () -> Unit,
     onRetry: () -> Unit,
     onScan: () -> Unit,
     isScanRunning: Boolean,
+    onPendingPhotos: () -> Unit,
     onHiddenItems: () -> Unit,
     onContextUpdate: () -> Unit,
     onReset: () -> Unit,
@@ -1519,6 +1595,18 @@ private fun SettingsMenuDialog(
         title = { Text("설정") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = onKakaoImport,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("카카오톡 대화 가져오기", modifier = Modifier.weight(1f))
+                }
+                HorizontalDivider()
                 if (pendingRetryCount > 0) {
                     TextButton(
                         onClick = onRetry,
@@ -1549,6 +1637,20 @@ private fun SettingsMenuDialog(
                     )
                 }
                 HorizontalDivider()
+                if (pendingPhotoCount > 0) {
+                    TextButton(
+                        onClick = onPendingPhotos,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("확인 필요한 사진 (${pendingPhotoCount}장)", modifier = Modifier.weight(1f))
+                    }
+                    HorizontalDivider()
+                }
                 TextButton(
                     onClick = onContextUpdate,
                     modifier = Modifier.fillMaxWidth(),

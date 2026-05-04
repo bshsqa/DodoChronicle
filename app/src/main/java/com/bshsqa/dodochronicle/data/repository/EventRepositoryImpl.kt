@@ -1,13 +1,16 @@
 package com.bshsqa.dodochronicle.data.repository
 
 import com.bshsqa.dodochronicle.data.local.db.dao.EventDao
+import com.bshsqa.dodochronicle.data.local.db.dao.PendingPhotoDao
 import com.bshsqa.dodochronicle.data.local.db.dao.PhotoRecordDao
 import com.bshsqa.dodochronicle.data.local.db.entity.EventEntity
+import com.bshsqa.dodochronicle.data.local.db.entity.PendingPhotoEntity
 import com.bshsqa.dodochronicle.data.local.db.entity.PhotoRecordEntity
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import kotlinx.coroutines.flow.Flow
@@ -21,7 +24,8 @@ import javax.inject.Singleton
 @Singleton
 class EventRepositoryImpl @Inject constructor(
     private val eventDao: EventDao,
-    private val photoDao: PhotoRecordDao
+    private val photoDao: PhotoRecordDao,
+    private val pendingPhotoDao: PendingPhotoDao
 ) : EventRepository {
 
     override fun observe(childId: String, category: EventCategory?, onlyFavorite: Boolean): Flow<List<Event>> =
@@ -55,6 +59,16 @@ class EventRepositoryImpl @Inject constructor(
         photoDao.insertAll(records.map { it.toEntity() })
     override suspend fun getLatestPhotoTakenAt(): Long? = photoDao.getLatestTakenAt()
     override suspend fun getAllPhotoUris(): List<String> = photoDao.getAllUris()
+    override suspend fun getAllPendingPhotoUris(): List<String> = pendingPhotoDao.getAllUris()
+    override fun observePendingPhotosForChild(childId: String): Flow<List<PendingPhoto>> =
+        pendingPhotoDao.observeForChild(childId).map { list -> list.map { it.toDomain() } }
+    override suspend fun upsertPendingPhotos(childId: String, photos: List<PendingPhoto>) =
+        pendingPhotoDao.upsertAll(photos.map { it.toEntity(childId) })
+    override suspend fun deletePendingPhotos(uris: List<String>) {
+        if (uris.isNotEmpty()) pendingPhotoDao.deleteByUris(uris)
+    }
+    override suspend fun deleteAllPendingPhotosForChild(childId: String) =
+        pendingPhotoDao.deleteAllForChild(childId)
     override suspend fun deletePhotoRecord(id: String) = photoDao.deleteById(id)
     override suspend fun deletePhotoRecordsBatch(ids: List<String>) {
         ids.forEach { photoDao.deleteById(it) }
@@ -123,5 +137,26 @@ class EventRepositoryImpl @Inject constructor(
         faceEmbeddingJson = Json.encodeToString(faceEmbedding.toList()),
         similarityScore = similarityScore,
         isExcludedFromModel = isExcludedFromModel
+    )
+
+    private fun PendingPhotoEntity.toDomain() = PendingPhoto(
+        uri = uri,
+        takenAt = takenAt,
+        addedAtSeconds = addedAtSeconds,
+        similarity = similarity,
+        faceEmbedding = try {
+            Json.decodeFromString<List<Float>>(faceEmbeddingJson).toFloatArray()
+        } catch (_: Exception) {
+            floatArrayOf()
+        }
+    )
+
+    private fun PendingPhoto.toEntity(childId: String) = PendingPhotoEntity(
+        uri = uri,
+        childId = childId,
+        takenAt = takenAt,
+        addedAtSeconds = addedAtSeconds,
+        similarity = similarity,
+        faceEmbeddingJson = Json.encodeToString(faceEmbedding.toList())
     )
 }

@@ -12,17 +12,19 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         ChildEntity::class,
         EventEntity::class,
         PhotoRecordEntity::class,
+        PendingPhotoEntity::class,
         KakaoRoomEntity::class,
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
     abstract fun childDao(): ChildDao
     abstract fun eventDao(): EventDao
     abstract fun photoRecordDao(): PhotoRecordDao
+    abstract fun pendingPhotoDao(): PendingPhotoDao
     abstract fun kakaoRoomDao(): KakaoRoomDao
     abstract fun kakaoMessageDao(): KakaoMessageDao
     abstract fun retryChunkDao(): RetryChunkDao
@@ -86,6 +88,26 @@ abstract class DodoDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE events ADD COLUMN searchAliasesJson TEXT NOT NULL DEFAULT '[]'")
                 database.execSQL("ALTER TABLE events ADD COLUMN relatedKeywordsJson TEXT NOT NULL DEFAULT '[]'")
                 database.execSQL("ALTER TABLE events ADD COLUMN searchContextVersion INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS pending_photos (
+                        uri TEXT NOT NULL PRIMARY KEY,
+                        childId TEXT NOT NULL,
+                        takenAt INTEGER NOT NULL,
+                        addedAtSeconds INTEGER NOT NULL,
+                        similarity REAL NOT NULL,
+                        faceEmbeddingJson TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        FOREIGN KEY(childId) REFERENCES children(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_childId ON pending_photos(childId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_createdAt ON pending_photos(createdAt)")
             }
         }
     }
