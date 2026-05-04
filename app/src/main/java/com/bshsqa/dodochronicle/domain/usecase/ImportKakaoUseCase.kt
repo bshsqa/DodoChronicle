@@ -6,6 +6,7 @@ import com.bshsqa.dodochronicle.ai.ExtractedEvent
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.RetryChunk
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
@@ -19,9 +20,6 @@ import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.util.UUID
 import javax.inject.Inject
-import com.bshsqa.dodochronicle.ml.TextEmbeddingEngine
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
 
 class ImportKakaoUseCase @Inject constructor(
     private val kakaoParser: KakaoParser,
@@ -29,8 +27,7 @@ class ImportKakaoUseCase @Inject constructor(
     private val eventRepository: EventRepository,
     private val childRepository: ChildRepository,
     private val geminiClassifier: GeminiEventClassifier,
-    private val retryChunkRepository: RetryChunkRepository,
-    private val textEmbeddingEngine: TextEmbeddingEngine
+    private val retryChunkRepository: RetryChunkRepository
 ) {
     sealed class Result {
         data class Success(
@@ -149,10 +146,6 @@ class ImportKakaoUseCase @Inject constructor(
 
                 if (apiSucceeded) {
                     val eventList = apiEvents.map { extracted ->
-                        val combinedText = "${extracted.content}\n${extracted.longContent ?: ""}".trim()
-                        val embedding = textEmbeddingEngine.getEmbedding(combinedText)
-                        val embeddingJson = Json.encodeToString(embedding.toList())
-
                         Event(
                             id = UUID.randomUUID().toString(),
                             childId = child.id,
@@ -162,7 +155,11 @@ class ImportKakaoUseCase @Inject constructor(
                             longContent = extracted.longContent,
                             rawExcerpt = extracted.rawExcerpt,
                             source = EventSource.KAKAO,
-                            textEmbeddingJson = embeddingJson
+                            searchSummary = extracted.searchSummary.ifBlank { extracted.content },
+                            searchTags = extracted.searchTags,
+                            searchAliases = extracted.searchAliases,
+                            relatedKeywords = extracted.relatedKeywords,
+                            searchContextVersion = SEARCH_CONTEXT_INDEX_VERSION
                         )
                     }
                     if (eventList.isNotEmpty()) eventRepository.insertAll(eventList)

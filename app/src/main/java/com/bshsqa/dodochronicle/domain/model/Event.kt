@@ -17,5 +17,10 @@ data class Event(
     val longContent: String? = null,
     val rawExcerpt: String? = null,
     val isHidden: Boolean = false,
-    val textEmbeddingJson: String = "[]"
+    val textEmbeddingJson: String = "[]",
+    val searchSummary: String = "",
+    val searchTags: List<String> = emptyList(),
+    val searchAliases: List<String> = emptyList(),
+    val relatedKeywords: List<String> = emptyList(),
+    val searchContextVersion: Int = SEARCH_CONTEXT_INDEX_VERSION
 )

@@ -8,11 +8,15 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
+import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
+import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
+import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
@@ -31,9 +35,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.Instant
@@ -94,7 +95,9 @@ data class TimelineUiState(
     val isContextSearch: Boolean = false,
     val isSearchDialogOpen: Boolean = false,
     val searchDraftQuery: String = "",
-    val isContextSearchDraft: Boolean = false
+    val isContextSearchDraft: Boolean = false,
+    val contextSearchSort: ContextSearchSort = ContextSearchSort.DATE,
+    val contextUpdateProgress: ImportProgress? = null
 )
 
 @HiltViewModel
@@ -111,7 +114,7 @@ class TimelineViewModel @Inject constructor(
     private val retryChunkRepository: RetryChunkRepository,
     private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
     private val dataStore: DataStore<Preferences>,
-    private val textEmbeddingEngine: com.bshsqa.dodochronicle.ml.TextEmbeddingEngine
+    private val geminiClassifier: GeminiEventClassifier
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TimelineUiState())
@@ -136,14 +139,6 @@ class TimelineViewModel @Inject constructor(
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
 
             launch { syncNewPhotos() }
-
-            launch {
-                textEmbeddingEngine.logSelfTestIfNeeded()
-            }
-
-            launch {
-                ensureTextEmbeddingsUpToDate()
-            }
 
             launch {
                 kakaoRepository.observeRooms().collect { rooms ->
@@ -221,39 +216,31 @@ class TimelineViewModel @Inject constructor(
                     .flatMapLatest { (cat, fav) ->
                         eventRepository.observe(childId, cat, fav)
                     }
-                    .combine(_state.map { it.searchQuery to it.isContextSearch }.distinctUntilChanged()) { events, searchState ->
+                    .combine(
+                        _state.map {
+                            Triple(it.searchQuery, it.isContextSearch, it.contextSearchSort)
+                        }.distinctUntilChanged()
+                    ) { events, searchState ->
                         events to searchState
                     }
                     .mapLatest { (events, searchState) ->
-                        val (query, isContextSearch) = searchState
+                        val query = searchState.first
+                        val isContextSearch = searchState.second
+                        val sort = searchState.third
                         if (query.isBlank()) {
                             events
                         } else if (isContextSearch) {
-                            val embeddingHealthy = textEmbeddingEngine.isHealthyForSemanticSearch()
-                            if (!embeddingHealthy && BuildConfig.DEBUG) {
-                                Log.w(
-                                    "TimelineContextSearch",
-                                    "Semantic search model is not healthy. Expected asset=${com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_ASSET_PATH}"
-                                )
-                            }
-                            val queryEmbedding = textEmbeddingEngine.getEmbedding(query)
-                            val scoredEvents = events.mapNotNull { event ->
-                                if (event.category == EventCategory.PHOTO) null else event
-                            }
-                            .map { event ->
-                                val eventEmbedding = parseEmbeddingJson(event.textEmbeddingJson)
-                                event to com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.cosineSimilarity(
-                                    queryEmbedding,
-                                    eventEmbedding
-                                )
-                            }
-                            .sortedByDescending { it.second }
-
+                            val scoredEvents = scoreContextSearch(events, query)
                             debugLogContextSearch(query, scoredEvents)
-
-                            scoredEvents
-                                .filter { (_, similarity) -> similarity >= 0.72f }
-                                .map { (event, _) -> event }
+                            when (sort) {
+                                ContextSearchSort.DATE -> scoredEvents.map { it.event }
+                                ContextSearchSort.RELEVANCE -> scoredEvents
+                                    .sortedWith(
+                                        compareByDescending<ContextSearchCandidate> { it.score }
+                                            .thenBy { it.event.date }
+                                    )
+                                    .map { it.event }
+                            }
                         } else {
                             val keywords = query.split("\\s+".toRegex()).filter { it.isNotBlank() }
                             events.filter { event ->
@@ -412,12 +399,14 @@ class TimelineViewModel @Inject constructor(
             if (query.isBlank()) {
                 it.copy(
                     searchQuery = "",
+                    contextSearchSort = ContextSearchSort.DATE,
                     isSearchDialogOpen = false
                 )
             } else {
                 it.copy(
                     searchQuery = query,
                     isContextSearch = it.isContextSearchDraft,
+                    contextSearchSort = ContextSearchSort.DATE,
                     isSearchDialogOpen = false
                 )
             }
@@ -430,19 +419,18 @@ class TimelineViewModel @Inject constructor(
                 searchQuery = "",
                 isSearchDialogOpen = false,
                 searchDraftQuery = "",
-                isContextSearchDraft = false
+                isContextSearchDraft = false,
+                contextSearchSort = ContextSearchSort.DATE
             )
         }
     }
 
+    fun setContextSearchSort(sort: ContextSearchSort) {
+        _state.update { it.copy(contextSearchSort = sort) }
+    }
+
     fun addManualEvent(date: LocalDate, category: EventCategory, content: String) {
         viewModelScope.launch {
-            val embeddingJson = if (category != EventCategory.PHOTO && content.isNotBlank()) {
-                val embedding = textEmbeddingEngine.getEmbedding(content)
-                val floatList: List<Float> = embedding.toList()
-                Json.encodeToString(ListSerializer(Float.serializer()), floatList)
-            } else "[]"
-            
             manageEventUseCase.addManual(
                 Event(
                     id = UUID.randomUUID().toString(),
@@ -451,7 +439,12 @@ class TimelineViewModel @Inject constructor(
                     category = category,
                     content = content,
                     source = EventSource.MANUAL,
-                    textEmbeddingJson = embeddingJson
+                    searchSummary = if (category != EventCategory.PHOTO) content.trim() else "",
+                    searchContextVersion = if (category != EventCategory.PHOTO) {
+                        SEARCH_CONTEXT_INDEX_VERSION
+                    } else {
+                        0
+                    }
                 )
             )
         }
@@ -675,6 +668,80 @@ class TimelineViewModel @Inject constructor(
         androidx.core.content.ContextCompat.startForegroundService(context, intent)
     }
 
+    fun updateSearchContexts() {
+        viewModelScope.launch {
+            val completedVersion = dataStore.data.first()[AppPrefsKeys.SEARCH_CONTEXT_INDEX_COMPLETED_VERSION] ?: 0
+            if (completedVersion >= SEARCH_CONTEXT_INDEX_VERSION) {
+                _state.update { it.copy(snackbar = "문맥 인덱스가 이미 최신입니다.") }
+                return@launch
+            }
+            if (!geminiClassifier.hasApiKey) {
+                _state.update { it.copy(snackbar = "Gemini API 키가 없어 문맥 업데이트를 실행할 수 없습니다.") }
+                return@launch
+            }
+
+            val targets = eventRepository.getEventsNeedingSearchContextUpdate(SEARCH_CONTEXT_INDEX_VERSION)
+            if (targets.isEmpty()) {
+                dataStore.edit { prefs ->
+                    prefs[AppPrefsKeys.SEARCH_CONTEXT_INDEX_COMPLETED_VERSION] = SEARCH_CONTEXT_INDEX_VERSION
+                }
+                _state.update { it.copy(snackbar = "문맥 인덱스가 이미 최신입니다.") }
+                return@launch
+            }
+
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    contextUpdateProgress = ImportProgress(0, targets.size, "문맥 업데이트")
+                )
+            }
+
+            var processed = 0
+            var failed = false
+            targets.chunked(10).forEachIndexed { index, batch ->
+                if (index > 0) kotlinx.coroutines.delay(12_000L)
+                val result = geminiClassifier.generateSearchContexts(batch)
+                if (result.contextsByEventId.isEmpty()) {
+                    failed = true
+                    return@forEachIndexed
+                }
+                batch.forEach { event ->
+                    val context = result.contextsByEventId[event.id]
+                        ?: EventSearchContext.fallback(event.content)
+                    try {
+                        eventRepository.updateSearchContext(event.id, context)
+                        processed++
+                    } catch (e: Exception) {
+                        failed = true
+                        Log.e("TimelineContextSearch", "Failed to update search context", e)
+                    }
+                }
+                _state.update {
+                    it.copy(
+                        contextUpdateProgress = ImportProgress(
+                            chunksDone = processed,
+                            totalChunks = targets.size,
+                            dateRange = "문맥 업데이트"
+                        )
+                    )
+                }
+            }
+
+            if (!failed) {
+                dataStore.edit { prefs ->
+                    prefs[AppPrefsKeys.SEARCH_CONTEXT_INDEX_COMPLETED_VERSION] = SEARCH_CONTEXT_INDEX_VERSION
+                }
+            }
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    contextUpdateProgress = null,
+                    snackbar = if (failed) "일부 문맥 업데이트에 실패했습니다." else "문맥 업데이트가 완료되었습니다."
+                )
+            }
+        }
+    }
+
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
 
     fun resetApp() {
@@ -691,69 +758,95 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    private fun buildContextSearchText(event: Event): String {
-        return listOfNotNull(
-            event.content.takeIf { it.isNotBlank() },
-            event.longContent?.takeIf { it.isNotBlank() },
-            event.rawExcerpt?.takeIf { it.isNotBlank() }
-        ).joinToString("\n")
-    }
+    private fun scoreContextSearch(events: List<Event>, query: String): List<ContextSearchCandidate> {
+        val tokens = tokenizeSearchQuery(query)
+        if (tokens.isEmpty()) return emptyList()
+        val phrase = query.trim().lowercase()
 
-    private fun parseEmbeddingJson(textEmbeddingJson: String): FloatArray {
-        return try {
-            Json.decodeFromString<List<Float>>(textEmbeddingJson).toFloatArray()
-        } catch (_: Exception) {
-            floatArrayOf()
+        return events.mapNotNull { event ->
+            if (event.category == EventCategory.PHOTO) return@mapNotNull null
+            val score = scoreEvent(event, tokens, phrase)
+            val matchedPrimaryOrAlias = matchesAny(
+                listOf(event.content, event.longContent.orEmpty(), event.rawExcerpt.orEmpty()) + event.searchAliases,
+                tokens
+            )
+            if (shouldIncludeContextResult(tokens.size, score, matchedPrimaryOrAlias)) {
+                ContextSearchCandidate(event, score)
+            } else {
+                null
+            }
         }
     }
 
-    private suspend fun ensureTextEmbeddingsUpToDate() {
-        if (childId.isBlank()) return
-        val currentVersion = dataStore.data.first()[AppPrefsKeys.TEXT_EMBEDDING_MODEL_VERSION] ?: 0L
-        if (currentVersion >= com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_VERSION) return
+    private fun scoreEvent(event: Event, tokens: List<String>, phrase: String): Int {
+        var score = 0
+        score += fieldScore(event.content, tokens, 5)
+        score += fieldScore(event.longContent.orEmpty(), tokens, 3)
+        score += fieldScore(event.rawExcerpt.orEmpty(), tokens, 3)
+        score += fieldScore(event.searchSummary, tokens, 3)
+        score += listScore(event.searchTags, tokens, 2)
+        score += listScore(event.searchAliases, tokens, 3)
+        score += listScore(event.relatedKeywords, tokens, 1)
 
-        try {
-            if (!textEmbeddingEngine.isHealthyForSemanticSearch()) {
-                Log.w("TimelineContextSearch", "Skip text embedding backfill because ONNX engine is not healthy")
-                return
-            }
-            val events = eventRepository.getAllTextEvents(childId)
-            events.forEach { event ->
-                val embedding = textEmbeddingEngine.getEmbedding(buildContextSearchText(event))
-                if (embedding.isEmpty()) return@forEach
-                val embeddingJson = Json.encodeToString(
-                    ListSerializer(Float.serializer()),
-                    embedding.toList()
-                )
-                eventRepository.updateTextEmbedding(event.id, embeddingJson)
-            }
-            dataStore.edit { prefs ->
-                prefs[AppPrefsKeys.TEXT_EMBEDDING_MODEL_VERSION] =
-                    com.bshsqa.dodochronicle.ml.TextEmbeddingEngine.MODEL_VERSION
-            }
-            if (BuildConfig.DEBUG) {
-                Log.d("TimelineContextSearch", "Text embedding backfill completed for ${events.size} events")
-            }
-        } catch (e: Exception) {
-            Log.e("TimelineContextSearch", "Failed to backfill text embeddings", e)
-        }
+        val allSearchText = buildContextSearchText(event).lowercase()
+        if (phrase.isNotBlank() && allSearchText.contains(phrase)) score += 4
+        if (tokens.all { token -> allSearchText.contains(token) }) score += 3
+        return score
     }
 
-    private fun debugLogContextSearch(query: String, scoredEvents: List<Pair<Event, Float>>) {
-        if (!BuildConfig.DEBUG) return
-        val topMatches = scoredEvents.take(5).joinToString(separator = " | ") { (event, similarity) ->
-            "${"%.3f".format(similarity)}:${event.content.take(24)}"
+    private fun fieldScore(text: String, tokens: List<String>, weight: Int): Int {
+        val lower = text.lowercase()
+        return tokens.count { token -> lower.contains(token) } * weight
+    }
+
+    private fun listScore(values: List<String>, tokens: List<String>, weight: Int): Int =
+        values.sumOf { value -> fieldScore(value, tokens, weight) }
+
+    private fun matchesAny(values: List<String>, tokens: List<String>): Boolean =
+        values.any { value ->
+            val lower = value.lowercase()
+            tokens.any { lower.contains(it) }
         }
-        val scoreRange = if (scoredEvents.isEmpty()) {
-            "empty"
-        } else {
-            val max = scoredEvents.maxOf { it.second }
-            val min = scoredEvents.minOf { it.second }
-            "min=${"%.3f".format(min)}, max=${"%.3f".format(max)}"
+
+    private fun shouldIncludeContextResult(
+        tokenCount: Int,
+        score: Int,
+        matchedPrimaryOrAlias: Boolean
+    ): Boolean {
+        if (score <= 0) return false
+        if (tokenCount <= 1) return score >= 2 || matchedPrimaryOrAlias
+        return score >= 3 || matchedPrimaryOrAlias
+    }
+
+    private fun buildContextSearchText(event: Event): String =
+        listOf(
+            event.content,
+            event.longContent.orEmpty(),
+            event.rawExcerpt.orEmpty(),
+            event.searchSummary,
+            event.searchTags.joinToString(" "),
+            event.searchAliases.joinToString(" "),
+            event.relatedKeywords.joinToString(" ")
+        ).joinToString(" ")
+
+    private fun tokenizeSearchQuery(query: String): List<String> =
+        query.trim()
+            .lowercase()
+            .split("\\s+".toRegex())
+            .filter { it.isNotBlank() }
+
+    private fun debugLogContextSearch(query: String, scoredEvents: List<ContextSearchCandidate>) {
+        val topMatches = scoredEvents.take(5).joinToString(separator = " | ") { candidate ->
+            "${candidate.score}:${candidate.event.content.take(24)}"
         }
         Log.d(
             "TimelineContextSearch",
-            "query=\"$query\" total=${scoredEvents.size} $scoreRange top=$topMatches"
+            "query=\"$query\" total=${scoredEvents.size} top=$topMatches"
         )
     }
 }
+
+private data class ContextSearchCandidate(
+    val event: Event,
+    val score: Int
+)

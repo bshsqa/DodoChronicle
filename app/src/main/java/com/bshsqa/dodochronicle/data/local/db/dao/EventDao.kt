@@ -37,8 +37,31 @@ interface EventDao {
     """)
     suspend fun getAllTextEvents(childId: String): List<EventEntity>
 
-    @Query("UPDATE events SET textEmbeddingJson = :textEmbeddingJson WHERE id = :id")
-    suspend fun updateTextEmbedding(id: String, textEmbeddingJson: String)
+    @Query("""
+        SELECT * FROM events
+        WHERE category != 'PHOTO'
+        AND searchContextVersion < :currentVersion
+        ORDER BY date ASC
+    """)
+    suspend fun getEventsNeedingSearchContextUpdate(currentVersion: Int): List<EventEntity>
+
+    @Query("""
+        UPDATE events
+        SET searchSummary = :searchSummary,
+            searchTagsJson = :searchTagsJson,
+            searchAliasesJson = :searchAliasesJson,
+            relatedKeywordsJson = :relatedKeywordsJson,
+            searchContextVersion = :searchContextVersion
+        WHERE id = :id
+    """)
+    suspend fun updateSearchContext(
+        id: String,
+        searchSummary: String,
+        searchTagsJson: String,
+        searchAliasesJson: String,
+        relatedKeywordsJson: String,
+        searchContextVersion: Int
+    )
 
     @Query("UPDATE events SET isFavorite = :isFavorite WHERE id = :id")
     suspend fun setFavorite(id: String, isFavorite: Boolean)

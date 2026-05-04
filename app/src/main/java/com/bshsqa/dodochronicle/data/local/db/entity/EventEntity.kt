@@ -27,5 +27,10 @@ data class EventEntity(
     val longContent: String? = null,
     val rawExcerpt: String? = null,
     val isHidden: Boolean = false,
-    val textEmbeddingJson: String = "[]"
+    val textEmbeddingJson: String = "[]",
+    val searchSummary: String = "",
+    val searchTagsJson: String = "[]",
+    val searchAliasesJson: String = "[]",
+    val relatedKeywordsJson: String = "[]",
+    val searchContextVersion: Int = 0
 )

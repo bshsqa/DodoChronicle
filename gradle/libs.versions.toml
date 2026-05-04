@@ -48,10 +48,6 @@ datastore = "1.1.2"
 # Coil
 coil = "2.7.0"
 
-# DJL / ONNX
-djl = "0.33.0"
-onnxruntimeAndroid = "1.23.1"
-
 # OkHttp + Retrofit
 okhttp = "4.12.0"
 retrofit = "2.11.0"
@@ -122,12 +118,6 @@ serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serializ
 
 # Coil
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
-
-# DJL / ONNX
-djl-api = { group = "ai.djl", name = "api", version.ref = "djl" }
-djl-huggingface-tokenizers = { group = "ai.djl.huggingface", name = "tokenizers", version.ref = "djl" }
-djl-android-tokenizer-native = { group = "ai.djl.android", name = "tokenizer-native", version.ref = "djl" }
-onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntimeAndroid" }
 
 # OkHttp + Retrofit
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }

@@ -101,12 +101,6 @@ dependencies {
     // TFLite
     implementation(libs.tflite.core)
 
-    // ONNX / Tokenizers
-    implementation(libs.onnxruntime.android)
-    implementation(libs.djl.api)
-    implementation(libs.djl.huggingface.tokenizers)
-    runtimeOnly(libs.djl.android.tokenizer.native)
-
     // Coroutines
     implementation(libs.coroutines.android)
 

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
@@ -191,6 +192,31 @@ fun TimelineScreen(
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onSecondaryContainer
                             )
+                        }
+                    }
+                    if (state.isContextSearch) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SingleChoiceSegmentedButtonRow {
+                                SegmentedButton(
+                                    selected = state.contextSearchSort == ContextSearchSort.DATE,
+                                    onClick = { viewModel.setContextSearchSort(ContextSearchSort.DATE) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                                    label = { Text("날짜순") }
+                                )
+                                SegmentedButton(
+                                    selected = state.contextSearchSort == ContextSearchSort.RELEVANCE,
+                                    onClick = { viewModel.setContextSearchSort(ContextSearchSort.RELEVANCE) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                                    label = { Text("관련도순") }
+                                )
+                            }
                         }
                     }
                 }
@@ -379,6 +405,10 @@ fun TimelineScreen(
             onHiddenItems = {
                 showSettingsMenu = false
                 showHiddenItemsDialog = true
+            },
+            onContextUpdate = {
+                showSettingsMenu = false
+                viewModel.updateSearchContexts()
             },
             onReset = {
                 showSettingsMenu = false
@@ -1448,6 +1478,7 @@ private fun SettingsMenuDialog(
     onScan: () -> Unit,
     isScanRunning: Boolean,
     onHiddenItems: () -> Unit,
+    onContextUpdate: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1485,6 +1516,18 @@ private fun SettingsMenuDialog(
                         if (isScanRunning) "사진 분석 중..." else "신규 사진 로딩",
                         modifier = Modifier.weight(1f)
                     )
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onContextUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("문맥 업데이트", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
                 TextButton(

@@ -6,6 +6,7 @@ import com.bshsqa.dodochronicle.data.local.db.entity.EventEntity
 import com.bshsqa.dodochronicle.data.local.db.entity.PhotoRecordEntity
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.EventSource
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
@@ -31,8 +32,17 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun insertAll(events: List<Event>) = eventDao.insertAll(events.map { it.toEntity() })
     override suspend fun getAllTextEvents(childId: String): List<Event> =
         eventDao.getAllTextEvents(childId).map { it.toDomain() }
-    override suspend fun updateTextEmbedding(id: String, textEmbeddingJson: String) =
-        eventDao.updateTextEmbedding(id, textEmbeddingJson)
+    override suspend fun getEventsNeedingSearchContextUpdate(currentVersion: Int): List<Event> =
+        eventDao.getEventsNeedingSearchContextUpdate(currentVersion).map { it.toDomain() }
+    override suspend fun updateSearchContext(eventId: String, context: EventSearchContext) =
+        eventDao.updateSearchContext(
+            id = eventId,
+            searchSummary = context.searchSummary,
+            searchTagsJson = Json.encodeToString(context.searchTags),
+            searchAliasesJson = Json.encodeToString(context.searchAliases),
+            relatedKeywordsJson = Json.encodeToString(context.relatedKeywords),
+            searchContextVersion = context.searchContextVersion
+        )
     override suspend fun setFavorite(id: String, isFavorite: Boolean) = eventDao.setFavorite(id, isFavorite)
     override suspend fun setHidden(id: String, isHidden: Boolean) = eventDao.setHidden(id, isHidden)
     override fun observeHidden(childId: String): Flow<List<Event>> =
@@ -73,7 +83,12 @@ class EventRepositoryImpl @Inject constructor(
         longContent = longContent,
         rawExcerpt = rawExcerpt,
         isHidden = isHidden,
-        textEmbeddingJson = textEmbeddingJson
+        textEmbeddingJson = textEmbeddingJson,
+        searchSummary = searchSummary,
+        searchTags = decodeStringList(searchTagsJson),
+        searchAliases = decodeStringList(searchAliasesJson),
+        relatedKeywords = decodeStringList(relatedKeywordsJson),
+        searchContextVersion = searchContextVersion
     )
 
     private fun Event.toEntity() = EventEntity(
@@ -85,8 +100,16 @@ class EventRepositoryImpl @Inject constructor(
         longContent = longContent,
         rawExcerpt = rawExcerpt,
         isHidden = isHidden,
-        textEmbeddingJson = textEmbeddingJson
+        textEmbeddingJson = textEmbeddingJson,
+        searchSummary = searchSummary,
+        searchTagsJson = Json.encodeToString(searchTags),
+        searchAliasesJson = Json.encodeToString(searchAliases),
+        relatedKeywordsJson = Json.encodeToString(relatedKeywords),
+        searchContextVersion = searchContextVersion
     )
+
+    private fun decodeStringList(json: String): List<String> =
+        try { Json.decodeFromString<List<String>>(json) } catch (_: Exception) { emptyList() }
 
     private fun PhotoRecordEntity.toDomain() = PhotoRecord(
         id = id, eventId = eventId, localUri = localUri, takenAt = takenAt,

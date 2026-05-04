@@ -16,7 +16,7 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -77,6 +77,15 @@ abstract class DodoDatabase : RoomDatabase() {
                 database.execSQL(
                     "ALTER TABLE events ADD COLUMN textEmbeddingJson TEXT NOT NULL DEFAULT '[]'"
                 )
+            }
+        }
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE events ADD COLUMN searchSummary TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE events ADD COLUMN searchTagsJson TEXT NOT NULL DEFAULT '[]'")
+                database.execSQL("ALTER TABLE events ADD COLUMN searchAliasesJson TEXT NOT NULL DEFAULT '[]'")
+                database.execSQL("ALTER TABLE events ADD COLUMN relatedKeywordsJson TEXT NOT NULL DEFAULT '[]'")
+                database.execSQL("ALTER TABLE events ADD COLUMN searchContextVersion INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

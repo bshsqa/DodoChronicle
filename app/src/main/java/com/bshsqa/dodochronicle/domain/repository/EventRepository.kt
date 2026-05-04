@@ -2,6 +2,7 @@ package com.bshsqa.dodochronicle.domain.repository
 
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import kotlinx.coroutines.flow.Flow
 
@@ -16,7 +17,8 @@ interface EventRepository {
     suspend fun insert(event: Event)
     suspend fun insertAll(events: List<Event>)
     suspend fun getAllTextEvents(childId: String): List<Event>
-    suspend fun updateTextEmbedding(eventId: String, textEmbeddingJson: String)
+    suspend fun getEventsNeedingSearchContextUpdate(currentVersion: Int): List<Event>
+    suspend fun updateSearchContext(eventId: String, context: EventSearchContext)
     suspend fun setFavorite(id: String, isFavorite: Boolean)
     suspend fun setHidden(id: String, isHidden: Boolean)
     fun observeHidden(childId: String): Flow<List<Event>>
