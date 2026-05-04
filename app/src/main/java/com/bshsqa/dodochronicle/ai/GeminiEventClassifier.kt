@@ -6,6 +6,8 @@ import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.Gender
 import com.bshsqa.dodochronicle.domain.model.KakaoMessage
 import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
+import com.bshsqa.dodochronicle.domain.model.GeminiSettings
+import com.bshsqa.dodochronicle.domain.repository.GeminiSettingsRepository
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -26,7 +28,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
-import javax.inject.Named
 import javax.inject.Singleton
 
 data class ExtractedEvent(
@@ -83,13 +84,12 @@ private data class BrokenEvent(
 @Singleton
 class GeminiEventClassifier @Inject constructor(
     private val httpClient: OkHttpClient,
-    @Named("gemini_api_key") private val apiKey: String,
-    @Named("gemini_model") private val model: String
+    private val geminiSettingsRepository: GeminiSettingsRepository
 ) {
     private val gson = Gson()
     private val json = "application/json".toMediaType()
 
-    val hasApiKey: Boolean get() = apiKey.isNotBlank()
+    suspend fun isConfigured(): Boolean = geminiSettingsRepository.getSettings().isConfigured
 
     suspend fun extractEvents(
         messages: List<KakaoMessage>,
@@ -100,7 +100,9 @@ class GeminiEventClassifier @Inject constructor(
         onProgress: ((ChunkProgress) -> Unit)? = null
     ): ExtractionResult = withContext(Dispatchers.IO) {
         if (messages.isEmpty()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0))
-        if (apiKey.isBlank()) return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0, apiKeyMissing = true))
+        if (!geminiSettingsRepository.getSettings().isConfigured) {
+            return@withContext ExtractionResult(emptyList(), ExtractionStats(0, 0, apiKeyMissing = true))
+        }
 
         val chunks = buildChunks(messages, chunkSize)
         val allEvents = mutableListOf<ExtractedEvent>()
@@ -167,10 +169,11 @@ class GeminiEventClassifier @Inject constructor(
             "[$date] ${msg.sender}: ${msg.content}"
         }
 
-        val prompt = buildPrompt(msgText, childName, birthDate, gender, chunkStartDate, chunkEndDate)
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val settings = geminiSettingsRepository.getSettings()
+        if (!settings.isConfigured) return@withContext ChunkExtractionResult(emptyList(), 0, 0)
 
-        val raw = executeGeminiRequest(url, prompt)
+        val prompt = buildPrompt(msgText, childName, birthDate, gender, chunkStartDate, chunkEndDate)
+        val raw = executeGeminiRequest(settings, prompt)
             ?: return@withContext ChunkExtractionResult(emptyList(), 0, 0)
         Log.d("Gemini", "Response: $raw")
         val parsed = parseResponse(raw)
@@ -184,7 +187,7 @@ class GeminiEventClassifier @Inject constructor(
                 wholeJsonFailed = parsed.wholeJsonFailed
             )
             delay(1_000L)
-            val repairRaw = executeGeminiRequest(url, repairPrompt)
+            val repairRaw = executeGeminiRequest(settings, repairPrompt)
             if (repairRaw != null) {
                 repairRequests = 1
                 val repaired = parseResponse(repairRaw)
@@ -204,12 +207,12 @@ class GeminiEventClassifier @Inject constructor(
     }
 
     suspend fun generateSearchContexts(events: List<Event>): SearchContextBatchResult = withContext(Dispatchers.IO) {
-        if (events.isEmpty() || apiKey.isBlank()) {
+        val settings = geminiSettingsRepository.getSettings()
+        if (events.isEmpty() || !settings.isConfigured) {
             return@withContext SearchContextBatchResult(emptyMap(), 0)
         }
 
         val prompt = buildSearchContextPrompt(events)
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val body = gson.toJson(
             mapOf(
                 "contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt)))),
@@ -221,7 +224,11 @@ class GeminiEventClassifier @Inject constructor(
             )
         ).toRequestBody(json)
 
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(generateContentUrl(settings.modelId))
+            .header("x-goog-api-key", settings.apiKey)
+            .post(body)
+            .build()
         httpClient.newCall(request).execute().use { response ->
             val raw = response.body?.string()
             if (!response.isSuccessful || raw == null) {
@@ -232,7 +239,7 @@ class GeminiEventClassifier @Inject constructor(
         }
     }
 
-    private fun executeGeminiRequest(url: String, prompt: String): String? {
+    private fun executeGeminiRequest(settings: GeminiSettings, prompt: String): String? {
         val body = gson.toJson(
             mapOf(
                 "contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt)))),
@@ -244,7 +251,11 @@ class GeminiEventClassifier @Inject constructor(
             )
         ).toRequestBody(json)
 
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(generateContentUrl(settings.modelId))
+            .header("x-goog-api-key", settings.apiKey)
+            .post(body)
+            .build()
         return httpClient.newCall(request).execute().use { response ->
             val raw = response.body?.string()
             if (!response.isSuccessful || raw == null) {
@@ -254,6 +265,11 @@ class GeminiEventClassifier @Inject constructor(
                 raw
             }
         }
+    }
+
+    private fun generateContentUrl(modelId: String): String {
+        val path = if (modelId.startsWith("models/")) modelId else "models/$modelId"
+        return "https://generativelanguage.googleapis.com/v1beta/$path:generateContent"
     }
 
     private fun calculateAge(birthDate: LocalDate, refDate: LocalDate): String {

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -49,6 +50,7 @@ import com.bshsqa.dodochronicle.R
 import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
+import com.bshsqa.dodochronicle.domain.model.GeminiModelOption
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
@@ -85,6 +87,7 @@ fun TimelineScreen(
     var showHiddenItemsDialog by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showImportEventsDialog by remember { mutableStateOf(false) }
+    var showGeminiSettingsDialog by remember { mutableStateOf(false) }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
@@ -579,6 +582,12 @@ fun TimelineScreen(
                 showSettingsMenu = false
                 viewModel.updateSearchContexts()
             },
+            geminiApiKeyConfigured = state.geminiApiKeyConfigured,
+            selectedGeminiModelId = state.selectedGeminiModelId,
+            onGeminiSettings = {
+                showSettingsMenu = false
+                showGeminiSettingsDialog = true
+            },
             onExportEvents = {
                 showSettingsMenu = false
                 viewModel.exportEvents { json ->
@@ -596,6 +605,25 @@ fun TimelineScreen(
                 showResetConfirm = true
             },
             onDismiss = { showSettingsMenu = false }
+        )
+    }
+
+    if (showGeminiSettingsDialog) {
+        GeminiSettingsDialog(
+            apiKeyConfigured = state.geminiApiKeyConfigured,
+            selectedModelId = state.selectedGeminiModelId,
+            modelOptions = state.geminiModelOptions,
+            isModelLoading = state.isGeminiModelLoading,
+            onLoadModels = viewModel::loadGeminiModels,
+            onSave = { apiKey, modelId ->
+                viewModel.saveGeminiSettings(apiKey, modelId)
+                showGeminiSettingsDialog = false
+            },
+            onClear = {
+                viewModel.clearGeminiSettings()
+                showGeminiSettingsDialog = false
+            },
+            onDismiss = { showGeminiSettingsDialog = false }
         )
     }
 
@@ -1009,6 +1037,120 @@ private fun PendingPhotosDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun GeminiSettingsDialog(
+    apiKeyConfigured: Boolean,
+    selectedModelId: String,
+    modelOptions: List<GeminiModelOption>,
+    isModelLoading: Boolean,
+    onLoadModels: (String) -> Unit,
+    onSave: (String, String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var apiKey by remember { mutableStateOf("") }
+    var selectedModel by remember(selectedModelId, modelOptions) {
+        mutableStateOf(selectedModelId.ifBlank { modelOptions.firstOrNull()?.id.orEmpty() })
+    }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = modelOptions.firstOrNull { it.id == selectedModel }?.label
+        ?: selectedModel.removePrefix("models/").ifBlank { "모델 선택" }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Gemini API 설정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    if (apiKeyConfigured) {
+                        "저장된 API 키가 있습니다. 새 키를 입력하지 않으면 기존 키를 유지합니다."
+                    } else {
+                        "Gemini API 키를 입력한 뒤 모델 목록을 불러오세요."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("Gemini API 키") },
+                    placeholder = { Text(if (apiKeyConfigured) "기존 키 유지" else "AIza...") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedButton(
+                    onClick = { onLoadModels(apiKey.trim()) },
+                    enabled = !isModelLoading && (apiKey.isNotBlank() || apiKeyConfigured),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isModelLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isModelLoading) "모델 목록 불러오는 중..." else "모델 목록 불러오기")
+                }
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        enabled = modelOptions.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(selectedLabel, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        modelOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            option.id,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedModel = option.id
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(apiKey.trim(), selectedModel) },
+                enabled = selectedModel.isNotBlank() && (apiKey.isNotBlank() || apiKeyConfigured)
+            ) { Text("저장") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = onClear,
+                    enabled = apiKeyConfigured
+                ) { Text("삭제") }
+                TextButton(onClick = onDismiss) { Text("취소") }
+            }
         }
     )
 }
@@ -1993,6 +2135,9 @@ private fun SettingsMenuDialog(
     onPendingPhotos: () -> Unit,
     onHiddenItems: () -> Unit,
     onContextUpdate: () -> Unit,
+    geminiApiKeyConfigured: Boolean,
+    selectedGeminiModelId: String,
+    onGeminiSettings: () -> Unit,
     onExportEvents: () -> Unit,
     onImportEvents: () -> Unit,
     onReset: () -> Unit,
@@ -2030,6 +2175,37 @@ private fun SettingsMenuDialog(
                     }
                     HorizontalDivider()
                 }
+                TextButton(
+                    onClick = onGeminiSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (geminiApiKeyConfigured) {
+                            "Gemini API 설정 (${selectedGeminiModelId.removePrefix("models/").ifBlank { "모델 선택" }})"
+                        } else {
+                            "Gemini API 설정"
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onContextUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("문맥 업데이트", modifier = Modifier.weight(1f))
+                }
+                HorizontalDivider()
                 TextButton(
                     onClick = onScan,
                     enabled = !isScanRunning,
@@ -2073,18 +2249,6 @@ private fun SettingsMenuDialog(
                     }
                     HorizontalDivider()
                 }
-                TextButton(
-                    onClick = onContextUpdate,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("문맥 업데이트", modifier = Modifier.weight(1f))
-                }
-                HorizontalDivider()
                 TextButton(
                     onClick = onExportEvents,
                     modifier = Modifier.fillMaxWidth(),

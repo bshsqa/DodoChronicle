@@ -14,12 +14,14 @@ import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
 import com.bshsqa.dodochronicle.domain.model.EventSearchContext
 import com.bshsqa.dodochronicle.domain.model.EventSource
+import com.bshsqa.dodochronicle.domain.model.GeminiModelOption
 import com.bshsqa.dodochronicle.domain.model.KakaoRoom
 import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import com.bshsqa.dodochronicle.domain.model.SEARCH_CONTEXT_INDEX_VERSION
 import com.bshsqa.dodochronicle.domain.repository.ChildRepository
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
+import com.bshsqa.dodochronicle.domain.repository.GeminiSettingsRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
@@ -108,7 +110,11 @@ data class TimelineUiState(
     val isContextSearchDraft: Boolean = false,
     val contextSearchSort: ContextSearchSort = ContextSearchSort.DATE,
     val contextUpdateProgress: ImportProgress? = null,
-    val isEventImportRunning: Boolean = false
+    val isEventImportRunning: Boolean = false,
+    val geminiApiKeyConfigured: Boolean = false,
+    val selectedGeminiModelId: String = "",
+    val geminiModelOptions: List<GeminiModelOption> = emptyList(),
+    val isGeminiModelLoading: Boolean = false
 )
 
 @HiltViewModel
@@ -128,7 +134,8 @@ class TimelineViewModel @Inject constructor(
     private val retryChunkRepository: RetryChunkRepository,
     private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
     private val dataStore: DataStore<Preferences>,
-    private val geminiClassifier: GeminiEventClassifier
+    private val geminiClassifier: GeminiEventClassifier,
+    private val geminiSettingsRepository: GeminiSettingsRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TimelineUiState())
@@ -153,6 +160,19 @@ class TimelineViewModel @Inject constructor(
             }
             childId = child.id
             _state.update { it.copy(childName = child.name, birthDate = child.birthDate) }
+
+            launch {
+                geminiSettingsRepository.settingsFlow.collect { settings ->
+                    val cachedModels = geminiSettingsRepository.getCachedModels()
+                    _state.update {
+                        it.copy(
+                            geminiApiKeyConfigured = settings.apiKey.isNotBlank(),
+                            selectedGeminiModelId = settings.modelId,
+                            geminiModelOptions = mergeModelOptions(cachedModels, settings.modelId)
+                        )
+                    }
+                }
+            }
 
             launch { syncNewPhotos(manual = false) }
 
@@ -654,6 +674,10 @@ class TimelineViewModel @Inject constructor(
     }
 
     fun importKakao(uri: Uri, roomAlias: String) {
+        if (!_state.value.isGeminiConfigured()) {
+            _state.update { it.copy(snackbar = "Gemini API 키와 모델을 먼저 설정해주세요.") }
+            return
+        }
         lastImportAlias = roomAlias
         lastImportRoomId = null
         _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
@@ -687,6 +711,10 @@ class TimelineViewModel @Inject constructor(
 
     /** 설정 메뉴의 재시도 방 선택 후 호출 */
     fun retryRoom(roomId: String) {
+        if (!_state.value.isGeminiConfigured()) {
+            _state.update { it.copy(snackbar = "Gemini API 키와 모델을 먼저 설정해주세요.") }
+            return
+        }
         _state.update { it.copy(isLoading = true, importProgress = null, importDone = null) }
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
@@ -792,6 +820,73 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun loadGeminiModels(apiKeyInput: String) {
+        viewModelScope.launch {
+            val key = apiKeyInput.trim().ifBlank {
+                geminiSettingsRepository.getSettings().apiKey
+            }
+            if (key.isBlank()) {
+                _state.update { it.copy(snackbar = "Gemini API 키를 먼저 입력해주세요.") }
+                return@launch
+            }
+
+            _state.update { it.copy(isGeminiModelLoading = true) }
+            try {
+                val models = geminiSettingsRepository.fetchModels(key)
+                _state.update { state ->
+                    state.copy(
+                        isGeminiModelLoading = false,
+                        geminiModelOptions = models,
+                        selectedGeminiModelId = state.selectedGeminiModelId.ifBlank { models.first().id },
+                        snackbar = "Gemini 모델 목록을 불러왔습니다."
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isGeminiModelLoading = false,
+                        snackbar = e.message ?: "모델 목록을 불러오지 못했습니다."
+                    )
+                }
+            }
+        }
+    }
+
+    fun saveGeminiSettings(apiKeyInput: String, modelId: String) {
+        viewModelScope.launch {
+            try {
+                val existing = geminiSettingsRepository.getSettings()
+                val key = apiKeyInput.trim().ifBlank { existing.apiKey }
+                if (key.isBlank()) {
+                    _state.update { it.copy(snackbar = "Gemini API 키를 먼저 입력해주세요.") }
+                    return@launch
+                }
+                if (modelId.isBlank()) {
+                    _state.update { it.copy(snackbar = "Gemini 모델을 선택해주세요.") }
+                    return@launch
+                }
+                geminiSettingsRepository.save(key, modelId)
+                _state.update { it.copy(snackbar = "Gemini API 설정을 저장했습니다.") }
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbar = e.message ?: "Gemini API 설정 저장에 실패했습니다.") }
+            }
+        }
+    }
+
+    fun clearGeminiSettings() {
+        viewModelScope.launch {
+            geminiSettingsRepository.clear()
+            _state.update {
+                it.copy(
+                    geminiApiKeyConfigured = false,
+                    selectedGeminiModelId = "",
+                    geminiModelOptions = emptyList(),
+                    snackbar = "Gemini API 설정을 삭제했습니다."
+                )
+            }
+        }
+    }
+
     fun updateSearchContexts() {
         viewModelScope.launch {
             val completedVersion = dataStore.data.first()[AppPrefsKeys.SEARCH_CONTEXT_INDEX_COMPLETED_VERSION] ?: 0
@@ -799,8 +894,8 @@ class TimelineViewModel @Inject constructor(
                 _state.update { it.copy(snackbar = "문맥 인덱스가 이미 최신입니다.") }
                 return@launch
             }
-            if (!geminiClassifier.hasApiKey) {
-                _state.update { it.copy(snackbar = "Gemini API 키가 없어 문맥 업데이트를 실행할 수 없습니다.") }
+            if (!geminiClassifier.isConfigured()) {
+                _state.update { it.copy(snackbar = "Gemini API 키와 모델을 먼저 설정해주세요.") }
                 return@launch
             }
 
@@ -924,6 +1019,23 @@ class TimelineViewModel @Inject constructor(
     fun showSnackbar(message: String) {
         _state.update { it.copy(snackbar = message) }
     }
+
+    private fun mergeModelOptions(
+        cachedModels: List<GeminiModelOption>,
+        selectedModelId: String
+    ): List<GeminiModelOption> {
+        if (selectedModelId.isBlank()) return cachedModels
+        if (cachedModels.any { it.id == selectedModelId }) return cachedModels
+        return listOf(
+            GeminiModelOption(
+                id = selectedModelId,
+                label = selectedModelId.removePrefix("models/")
+            )
+        ) + cachedModels
+    }
+
+    private fun TimelineUiState.isGeminiConfigured(): Boolean =
+        geminiApiKeyConfigured && selectedGeminiModelId.isNotBlank()
 
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }
 

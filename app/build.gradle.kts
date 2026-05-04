@@ -29,19 +29,20 @@ android {
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "GEMINI_API_KEY", "\"${localProps["GEMINI_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"gemini-3.1-flash-lite-preview\"")
+        buildConfigField("String", "GEMINI_DEFAULT_MODEL", "\"models/gemini-3.1-flash-lite-preview\"")
     }
 
     buildTypes {
         debug {
             isDebuggable = true
-            buildConfigField("int", "PHOTO_SCAN_LIMIT", "-1")
+            buildConfigField("int", "PHOTO_SCAN_LIMIT", "30")
+            buildConfigField("String", "GEMINI_API_KEY", "\"${localProps["GEMINI_API_KEY"] ?: ""}\"")
         }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("int", "PHOTO_SCAN_LIMIT", "-1")
+            buildConfigField("String", "GEMINI_API_KEY", "\"\"")
         }
     }
 

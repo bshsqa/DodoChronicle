@@ -40,6 +40,7 @@ class RetryFailedChunksUseCase @Inject constructor(
 
         val retryChunks = retryChunkRepository.getByRoom(roomId).sortedBy { it.sentAtStart }
         if (retryChunks.isEmpty()) return@withContext Result(0, 0, 0, 0)
+        if (!geminiClassifier.isConfigured()) return@withContext Result(0, 0, 0, retryChunks.size)
 
         var totalAddedEvents = 0
         var totalRequests = 0

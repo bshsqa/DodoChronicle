@@ -70,13 +70,14 @@ class ImportKakaoUseCase @Inject constructor(
             if (newMessages.isEmpty()) return@withContext Result.Success(0, 0)
 
             val textMessages = newMessages.filter { it.content != "사진" && it.content != "동영상" }
-            if (!geminiClassifier.hasApiKey || textMessages.isEmpty()) {
+            val isGeminiConfigured = geminiClassifier.isConfigured()
+            if (!isGeminiConfigured || textMessages.isEmpty()) {
                 kakaoRepository.insertMessages(newMessages)
                 kakaoRepository.updateLastImported(room.id, newMessages.last().sentAt)
                 return@withContext Result.Success(
                     addedMessages = newMessages.size,
                     addedEvents = 0,
-                    apiKeyMissing = !geminiClassifier.hasApiKey
+                    apiKeyMissing = !isGeminiConfigured
                 )
             }
 

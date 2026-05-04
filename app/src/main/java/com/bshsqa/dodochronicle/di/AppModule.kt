@@ -13,7 +13,6 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
-import javax.inject.Named
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "dodo_prefs")
@@ -31,18 +30,11 @@ object AppModule {
             if (BuildConfig.DEBUG) {
                 addInterceptor(HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BODY
+                    redactHeader("x-goog-api-key")
                 })
             }
         }
         .build()
-
-    @Provides
-    @Named("gemini_api_key")
-    fun provideGeminiApiKey(): String = BuildConfig.GEMINI_API_KEY
-
-    @Provides
-    @Named("gemini_model")
-    fun provideGeminiModel(): String = BuildConfig.GEMINI_MODEL
 
     @Provides
     @Singleton
