@@ -131,6 +131,20 @@ fun TimelineScreen(
             }
         }
     }
+    val importEventsFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.bufferedReader(Charsets.UTF_8).readText()
+                } ?: error("파일을 열 수 없습니다")
+                viewModel.importEventsFromJson(json)
+            } catch (_: Exception) {
+                viewModel.showSnackbar("이벤트 파일을 읽을 수 없습니다")
+            }
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -633,6 +647,10 @@ fun TimelineScreen(
     if (showImportEventsDialog) {
         ImportEventsDialog(
             onDismiss = { showImportEventsDialog = false },
+            onPickLocalFile = {
+                showImportEventsDialog = false
+                importEventsFileLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+            },
             onImport = { url ->
                 showImportEventsDialog = false
                 viewModel.importEventsFromUrl(url)
@@ -998,6 +1016,7 @@ private fun PendingPhotosDialog(
 @Composable
 private fun ImportEventsDialog(
     onDismiss: () -> Unit,
+    onPickLocalFile: () -> Unit,
     onImport: (String) -> Unit
 ) {
     var url by remember { mutableStateOf("") }
@@ -1017,10 +1036,13 @@ private fun ImportEventsDialog(
             )
         },
         confirmButton = {
-            TextButton(
-                onClick = { onImport(url.trim()) },
-                enabled = url.isNotBlank()
-            ) { Text("가져오기") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onPickLocalFile) { Text("파일 선택") }
+                TextButton(
+                    onClick = { onImport(url.trim()) },
+                    enabled = url.isNotBlank()
+                ) { Text("링크 가져오기") }
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("취소") }

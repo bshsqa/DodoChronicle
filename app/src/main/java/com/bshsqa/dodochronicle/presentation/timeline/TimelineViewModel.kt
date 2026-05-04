@@ -899,6 +899,28 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    fun importEventsFromJson(json: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isEventImportRunning = true) }
+            try {
+                val result = importEventsUseCase.fromJson(json)
+                _state.update {
+                    it.copy(
+                        isEventImportRunning = false,
+                        snackbar = "이벤트 ${result.imported}개를 가져왔습니다. 중복 ${result.duplicates}개, 오류 ${result.skipped}개는 제외했습니다."
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isEventImportRunning = false,
+                        snackbar = e.message ?: "이벤트 가져오기에 실패했습니다"
+                    )
+                }
+            }
+        }
+    }
+
     fun showSnackbar(message: String) {
         _state.update { it.copy(snackbar = message) }
     }
