@@ -30,6 +30,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.bshsqa.dodochronicle.R
 import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
@@ -128,7 +130,21 @@ fun TimelineScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.childName.ifBlank { "DodoChronicle" }) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.dodo_child_mark),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                        )
+                        Text(state.childName.ifBlank { "DodoChronicle" })
+                    }
+                },
                 actions = {
                     IconButton(onClick = viewModel::toggleFavoriteFilter) {
                         Icon(
@@ -314,6 +330,13 @@ fun TimelineScreen(
                             )
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
+                        Image(
+                            painter = painterResource(R.drawable.dodo_loading_mark),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                        )
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
                             "카카오 대화 분석 중...",
@@ -369,6 +392,13 @@ fun TimelineScreen(
                             )
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
+                        Image(
+                            painter = painterResource(R.drawable.dodo_loading_mark),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                        )
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
                             if (state.isMissingPhotoCheckRunning) {
