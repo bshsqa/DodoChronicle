@@ -53,6 +53,7 @@ data class InitUiState(
     val referencePhotoUri: String = "",
     val scannedCount: Int = 0,
     val totalCount: Int = 0,
+    val scanElapsedSeconds: Long = 0L,
     val clusters: List<ClusterUiModel> = emptyList(),
     val selectedClusterIds: Set<Int> = emptySet(),
     val error: String? = null
@@ -84,7 +85,8 @@ class InitViewModel @Inject constructor(
                         it.copy(
                             step = InitStep.Scanning,
                             scannedCount = scanState.processed,
-                            totalCount = scanState.total
+                            totalCount = scanState.total,
+                            scanElapsedSeconds = scanState.elapsedSeconds
                         )
                     }
                     is ScanState.Done -> handleDone(scanState)
@@ -110,7 +112,13 @@ class InitViewModel @Inject constructor(
         val clusterUi = done.clusters.map { c ->
             ClusterUiModel(c.id, c.representativeUris, c.embeddings.size)
         }
-        _uiState.update { it.copy(step = InitStep.ClusterSelect, clusters = clusterUi) }
+        _uiState.update {
+            it.copy(
+                step = InitStep.ClusterSelect,
+                clusters = clusterUi,
+                scanElapsedSeconds = done.elapsedSeconds
+            )
+        }
     }
 
     fun setChildName(name: String) = _uiState.update { it.copy(childName = name) }
@@ -132,7 +140,7 @@ class InitViewModel @Inject constructor(
             }
             return
         }
-        _uiState.update { it.copy(step = InitStep.Scanning, error = null) }
+        _uiState.update { it.copy(step = InitStep.Scanning, error = null, scanElapsedSeconds = 0L) }
         context.startForegroundService(
             Intent(context, ScanForegroundService::class.java).apply {
                 action = ScanForegroundService.ACTION_START
@@ -153,6 +161,7 @@ class InitViewModel @Inject constructor(
                 step = InitStep.ChildInfo,
                 scannedCount = 0,
                 totalCount = 0,
+                scanElapsedSeconds = 0L,
                 clusters = emptyList(),
                 selectedClusterIds = emptySet(),
                 error = null

@@ -100,9 +100,10 @@ class ScanForegroundService : Service() {
     // ─── 스캔 핵심 로직 ────────────────────────────────────────────────────────
 
     private suspend fun performScan() {
+        val startedAt = System.currentTimeMillis()
         val photoUris = queryPhotos()
         val total = photoUris.size
-        stateHolder.emit(ScanState.Running(0, total))
+        stateHolder.emit(ScanState.Running(0, total, 0L))
         updateProgressNotification(0, total)
 
         val embeddings = mutableListOf<PhotoEmbedding>()
@@ -121,7 +122,8 @@ class ScanForegroundService : Service() {
                 }
             }
             processed++
-            stateHolder.emit(ScanState.Running(processed, total))
+            val elapsedSeconds = (System.currentTimeMillis() - startedAt) / 1000
+            stateHolder.emit(ScanState.Running(processed, total, elapsedSeconds))
 
             // 알림은 퍼센트 단위로 갱신해 Binder 호출 횟수를 최소화
             val currentPercent = if (total > 0) processed * 100 / total else 0
@@ -136,8 +138,9 @@ class ScanForegroundService : Service() {
             stateHolder.emit(ScanState.Failed("아이 얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요"))
             androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         } else {
-            stateHolder.emit(ScanState.Done(clusters, embeddings.toList()))
-            showCompletedNotification()
+            val elapsedSeconds = (System.currentTimeMillis() - startedAt) / 1000
+            stateHolder.emit(ScanState.Done(clusters, embeddings.toList(), elapsedSeconds))
+            showCompletedNotification(elapsedSeconds)
         }
     }
 
@@ -211,11 +214,11 @@ class ScanForegroundService : Service() {
             .notify(NOTIFICATION_ID, buildProgressNotification(processed, total))
     }
 
-    private fun showCompletedNotification() {
+    private fun showCompletedNotification(elapsedSeconds: Long) {
         val notification = Notification.Builder(this, DodoApp.SCAN_RESULT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_scan)
             .setContentTitle("사진 분류 완료")
-            .setContentText("앱을 열어 아이 그룹을 선택해주세요.")
+            .setContentText("총 ${formatDuration(elapsedSeconds)} 소요 · 앱을 열어 아이 그룹을 선택해주세요.")
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(mainActivityPendingIntent())
@@ -226,5 +229,11 @@ class ScanForegroundService : Service() {
         androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)
             .notify(RESULT_NOTIFICATION_ID, notification)
+    }
+
+    private fun formatDuration(totalSeconds: Long): String {
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
     }
 }

@@ -250,6 +250,12 @@ private fun ScanningStep(state: InitUiState, vm: InitViewModel) {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "현재까지 ${formatElapsedTime(state.scanElapsedSeconds)} 소요",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(24.dp))
             LinearProgressIndicator(
                 progress = { progress },
@@ -283,7 +289,7 @@ private fun ClusterSelectStep(state: InitUiState, vm: InitViewModel) {
         Text("아이 그룹 선택", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "인식된 인물 그룹에서 아이의 그룹을 선택해주세요.\n여러 그룹을 선택할 수 있습니다.",
+            "사진 분석 완료 · 총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요\n인식된 인물 그룹에서 아이의 그룹을 선택해주세요.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -317,6 +323,12 @@ private fun ClusterSelectStep(state: InitUiState, vm: InitViewModel) {
             Text("선택 완료 (${state.selectedClusterIds.size}개 그룹)", style = MaterialTheme.typography.titleMedium)
         }
     }
+}
+
+private fun formatElapsedTime(totalSeconds: Long): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
 }
 
 @Composable
