@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -922,9 +923,17 @@ private fun GroupedTimelineContent(
             byDate.entries.sortedByDescending { it.key }
         }
     }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(searchQuery, isContextSearch, contextSearchSort) {
+        if (searchQuery.isNotBlank()) {
+            listState.scrollToItem(0)
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
