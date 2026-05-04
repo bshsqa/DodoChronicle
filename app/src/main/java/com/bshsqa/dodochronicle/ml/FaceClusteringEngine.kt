@@ -21,7 +21,7 @@ data class FaceCluster(
 
 data class PhotoEmbedding(val uri: String, val takenAt: Long, val embedding: FloatArray)
 
-private const val CLUSTER_THRESHOLD = 0.6f
+private const val CLUSTER_THRESHOLD = 0.68f
 
 @Singleton
 class FaceClusteringEngine @Inject constructor() {

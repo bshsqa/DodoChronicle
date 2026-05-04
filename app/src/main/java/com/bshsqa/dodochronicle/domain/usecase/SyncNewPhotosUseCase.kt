@@ -20,7 +20,7 @@ import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 
-private const val AUTO_ADD_THRESHOLD = 0.75f
+private const val AUTO_ADD_THRESHOLD = 0.65f
 private const val AUTO_SKIP_THRESHOLD = 0.4f
 
 class SyncNewPhotosUseCase @Inject constructor(
