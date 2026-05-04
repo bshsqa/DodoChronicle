@@ -15,6 +15,8 @@ import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.DodoApp
 import com.bshsqa.dodochronicle.MainActivity
 import com.bshsqa.dodochronicle.R
+import com.bshsqa.dodochronicle.data.local.db.dao.InitialScanDao
+import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanPhotoEmbeddingEntity
 import com.bshsqa.dodochronicle.ml.FaceClusteringEngine
 import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
@@ -29,6 +31,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.util.UUID
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -38,6 +43,7 @@ class ScanForegroundService : Service() {
     @Inject lateinit var faceEmbedder: FaceEmbedder
     @Inject lateinit var clusteringEngine: FaceClusteringEngine
     @Inject lateinit var stateHolder: ScanStateHolder
+    @Inject lateinit var initialScanDao: InitialScanDao
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
@@ -46,6 +52,7 @@ class ScanForegroundService : Service() {
     companion object {
         const val ACTION_START  = "com.bshsqa.dodochronicle.action.SCAN_START"
         const val ACTION_CANCEL = "com.bshsqa.dodochronicle.action.SCAN_CANCEL"
+        const val EXTRA_SESSION_ID = "extra_session_id"
         private const val NOTIFICATION_ID = 1001
         private const val RESULT_NOTIFICATION_ID = 1003
         private const val WAKELOCK_TAG = "DodoChronicle::ScanWakeLock"
@@ -56,14 +63,19 @@ class ScanForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START  -> startScan()
+            ACTION_START  -> startScan(intent.getStringExtra(EXTRA_SESSION_ID).orEmpty())
             ACTION_CANCEL -> cancelScan()
         }
         return START_NOT_STICKY
     }
 
-    private fun startScan() {
+    private fun startScan(sessionId: String) {
         if (scanJob?.isActive == true) return
+        if (sessionId.isBlank()) {
+            stateHolder.emit(ScanState.Failed("사진 분석 세션을 시작할 수 없습니다. 다시 시도해주세요."))
+            stopSelf()
+            return
+        }
 
         startForeground(
             NOTIFICATION_ID,
@@ -77,7 +89,7 @@ class ScanForegroundService : Service() {
 
         scanJob = serviceScope.launch {
             try {
-                performScan()
+                performScan(sessionId)
             } finally {
                 stopSelf()
             }
@@ -99,11 +111,12 @@ class ScanForegroundService : Service() {
 
     // ─── 스캔 핵심 로직 ────────────────────────────────────────────────────────
 
-    private suspend fun performScan() {
+    private suspend fun performScan(sessionId: String) {
         val startedAt = System.currentTimeMillis()
         val photoUris = queryPhotos()
         val total = photoUris.size
-        stateHolder.emit(ScanState.Running(0, total, 0L))
+        initialScanDao.updateProgress(sessionId, "RUNNING", total, 0, 0L)
+        stateHolder.emit(ScanState.Running(0, total, 0L, sessionId))
         updateProgressNotification(0, total)
 
         val embeddings = mutableListOf<PhotoEmbedding>()
@@ -123,7 +136,10 @@ class ScanForegroundService : Service() {
             }
             processed++
             val elapsedSeconds = (System.currentTimeMillis() - startedAt) / 1000
-            stateHolder.emit(ScanState.Running(processed, total, elapsedSeconds))
+            if (processed % 25 == 0 || processed == total) {
+                initialScanDao.updateProgress(sessionId, "RUNNING", total, processed, elapsedSeconds)
+            }
+            stateHolder.emit(ScanState.Running(processed, total, elapsedSeconds, sessionId))
 
             // 알림은 퍼센트 단위로 갱신해 Binder 호출 횟수를 최소화
             val currentPercent = if (total > 0) processed * 100 / total else 0
@@ -139,7 +155,8 @@ class ScanForegroundService : Service() {
             androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
         } else {
             val elapsedSeconds = (System.currentTimeMillis() - startedAt) / 1000
-            stateHolder.emit(ScanState.Done(clusters, embeddings.toList(), elapsedSeconds))
+            saveCompletedScan(sessionId, clusters, embeddings, total, processed, elapsedSeconds)
+            stateHolder.emit(ScanState.Done(clusters, embeddings.toList(), elapsedSeconds, sessionId))
             showCompletedNotification(elapsedSeconds)
         }
     }
@@ -235,5 +252,38 @@ class ScanForegroundService : Service() {
         val minutes = totalSeconds / 60
         val seconds = totalSeconds % 60
         return if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
+    }
+
+    private suspend fun saveCompletedScan(
+        sessionId: String,
+        clusters: List<com.bshsqa.dodochronicle.ml.FaceCluster>,
+        embeddings: List<PhotoEmbedding>,
+        total: Int,
+        processed: Int,
+        elapsedSeconds: Long
+    ) {
+        val rows = embeddings.mapNotNull { embedding ->
+            val clusterId = clusters.firstOrNull { cluster ->
+                cluster.embeddings.any { it.contentEquals(embedding.embedding) }
+            }?.id ?: return@mapNotNull null
+
+            InitialScanPhotoEmbeddingEntity(
+                id = UUID.randomUUID().toString(),
+                sessionId = sessionId,
+                uri = embedding.uri,
+                takenAt = embedding.takenAt,
+                embeddingJson = Json.encodeToString(embedding.embedding.toList()),
+                clusterId = clusterId
+            )
+        }
+        initialScanDao.deleteEmbeddings(sessionId)
+        initialScanDao.insertEmbeddings(rows)
+        initialScanDao.markCompleted(
+            sessionId = sessionId,
+            completedAt = System.currentTimeMillis(),
+            totalCount = total,
+            processedCount = processed,
+            elapsedSeconds = elapsedSeconds
+        )
     }
 }

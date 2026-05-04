@@ -289,7 +289,11 @@ private fun ClusterSelectStep(state: InitUiState, vm: InitViewModel) {
         Text("아이 그룹 선택", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "사진 분석 완료 · 총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요\n인식된 인물 그룹에서 아이의 그룹을 선택해주세요.",
+            if (state.restoredScanResult) {
+                "이전 사진 분석 결과를 불러왔습니다.\n총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요된 분석 결과입니다."
+            } else {
+                "사진 분석 완료 · 총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요\n인식된 인물 그룹에서 아이의 그룹을 선택해주세요."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center

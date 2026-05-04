@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bshsqa.dodochronicle.data.local.db.dao.InitialScanDao
+import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanSessionEntity
 import com.bshsqa.dodochronicle.domain.model.Child
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
@@ -30,6 +32,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -54,6 +58,7 @@ data class InitUiState(
     val scannedCount: Int = 0,
     val totalCount: Int = 0,
     val scanElapsedSeconds: Long = 0L,
+    val restoredScanResult: Boolean = false,
     val clusters: List<ClusterUiModel> = emptyList(),
     val selectedClusterIds: Set<Int> = emptySet(),
     val error: String? = null
@@ -67,6 +72,7 @@ class InitViewModel @Inject constructor(
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val faceEmbedder: FaceEmbedder,
     private val stateHolder: ScanStateHolder,
+    private val initialScanDao: InitialScanDao,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -75,9 +81,12 @@ class InitViewModel @Inject constructor(
 
     // clusterID → 해당 클러스터에 속하는 PhotoEmbedding 목록
     private var _rawClusterPhotos: Map<Int, List<PhotoEmbedding>> = emptyMap()
+    private var currentScanSessionId: String? = null
 
     init {
         viewModelScope.launch {
+            restoreCompletedScanIfAny()
+
             stateHolder.state.collect { scanState ->
                 when (scanState) {
                     is ScanState.Running -> _uiState.update {
@@ -86,9 +95,10 @@ class InitViewModel @Inject constructor(
                             step = InitStep.Scanning,
                             scannedCount = scanState.processed,
                             totalCount = scanState.total,
-                            scanElapsedSeconds = scanState.elapsedSeconds
+                            scanElapsedSeconds = scanState.elapsedSeconds,
+                            restoredScanResult = false
                         )
-                    }
+                    }.also { currentScanSessionId = scanState.sessionId }
                     is ScanState.Done -> handleDone(scanState)
                     is ScanState.Failed -> {
                         stateHolder.reset()
@@ -103,6 +113,7 @@ class InitViewModel @Inject constructor(
     }
 
     private fun handleDone(done: ScanState.Done) {
+        currentScanSessionId = done.sessionId
         _rawClusterPhotos = done.clusters.associate { cluster ->
             cluster.id to done.embeddings.filter { pe ->
                 cluster.representativeUris.contains(pe.uri) ||
@@ -116,7 +127,60 @@ class InitViewModel @Inject constructor(
             it.copy(
                 step = InitStep.ClusterSelect,
                 clusters = clusterUi,
-                scanElapsedSeconds = done.elapsedSeconds
+                scanElapsedSeconds = done.elapsedSeconds,
+                restoredScanResult = false
+            )
+        }
+    }
+
+    private suspend fun restoreCompletedScanIfAny() {
+        val session = initialScanDao.getLatestCompletedSession() ?: return
+        val rows = initialScanDao.getEmbeddings(session.id)
+        if (rows.isEmpty()) {
+            initialScanDao.deleteSession(session.id)
+            return
+        }
+
+        val grouped = rows.groupBy { it.clusterId }
+        _rawClusterPhotos = grouped.mapValues { (_, items) ->
+            items.mapNotNull { row ->
+                val embedding = runCatching {
+                    Json.decodeFromString<List<Float>>(row.embeddingJson).toFloatArray()
+                }.getOrNull() ?: return@mapNotNull null
+                PhotoEmbedding(row.uri, row.takenAt, embedding)
+            }
+        }.filterValues { it.isNotEmpty() }
+
+        if (_rawClusterPhotos.isEmpty()) {
+            clearInitialScanCache(session.id)
+            return
+        }
+
+        currentScanSessionId = session.id
+        val restoredClusters = _rawClusterPhotos.map { (clusterId, photos) ->
+            ClusterUiModel(
+                id = clusterId,
+                previewUris = photos.take(9).map { it.uri },
+                count = photos.size
+            )
+        }.sortedByDescending { it.count }
+
+        val birthDate = runCatching { LocalDate.parse(session.birthDate) }.getOrNull()
+        val gender = runCatching { Gender.valueOf(session.gender) }.getOrNull()
+        _uiState.update {
+            it.copy(
+                step = InitStep.ClusterSelect,
+                childName = session.childName,
+                birthDate = birthDate,
+                gender = gender,
+                referencePhotoUri = session.referencePhotoUri,
+                scannedCount = session.processedCount,
+                totalCount = session.totalCount,
+                scanElapsedSeconds = session.elapsedSeconds,
+                restoredScanResult = true,
+                clusters = restoredClusters,
+                selectedClusterIds = emptySet(),
+                error = null
             )
         }
     }
@@ -140,12 +204,37 @@ class InitViewModel @Inject constructor(
             }
             return
         }
-        _uiState.update { it.copy(step = InitStep.Scanning, error = null, scanElapsedSeconds = 0L) }
-        context.startForegroundService(
-            Intent(context, ScanForegroundService::class.java).apply {
-                action = ScanForegroundService.ACTION_START
-            }
-        )
+        val sessionId = UUID.randomUUID().toString()
+        currentScanSessionId = sessionId
+        _uiState.update {
+            it.copy(
+                step = InitStep.Scanning,
+                error = null,
+                scanElapsedSeconds = 0L,
+                restoredScanResult = false
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            initialScanDao.deleteAllEmbeddings()
+            initialScanDao.deleteAllSessions()
+            initialScanDao.upsertSession(
+                InitialScanSessionEntity(
+                    id = sessionId,
+                    childName = state.childName.trim(),
+                    birthDate = state.birthDate.toString(),
+                    gender = state.gender.name,
+                    referencePhotoUri = state.referencePhotoUri,
+                    status = "RUNNING",
+                    startedAt = System.currentTimeMillis()
+                )
+            )
+            context.startForegroundService(
+                Intent(context, ScanForegroundService::class.java).apply {
+                    action = ScanForegroundService.ACTION_START
+                    putExtra(ScanForegroundService.EXTRA_SESSION_ID, sessionId)
+                }
+            )
+        }
     }
 
     fun cancelScanning() {
@@ -156,12 +245,17 @@ class InitViewModel @Inject constructor(
         )
         stateHolder.reset()
         _rawClusterPhotos = emptyMap()
+        currentScanSessionId?.let { sessionId ->
+            viewModelScope.launch(Dispatchers.IO) { clearInitialScanCache(sessionId) }
+        }
+        currentScanSessionId = null
         _uiState.update { state ->
             state.copy(
                 step = InitStep.ChildInfo,
                 scannedCount = 0,
                 totalCount = 0,
                 scanElapsedSeconds = 0L,
+                restoredScanResult = false,
                 clusters = emptyList(),
                 selectedClusterIds = emptySet(),
                 error = null
@@ -240,6 +334,8 @@ class InitViewModel @Inject constructor(
 
             // 5. ScanStateHolder 초기화 후 완료 처리
             stateHolder.reset()
+            currentScanSessionId?.let { sessionId -> clearInitialScanCache(sessionId) }
+            currentScanSessionId = null
             dataStore.edit { prefs ->
                 prefs[AppPrefsKeys.INITIALIZED] = true
                 prefs[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] = initialPhotoCutoffAt
@@ -261,5 +357,10 @@ class InitViewModel @Inject constructor(
             val dateCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATE_TAKEN)
             if (cursor.moveToFirst()) cursor.getLong(dateCol) else 0L
         } ?: 0L
+    }
+
+    private suspend fun clearInitialScanCache(sessionId: String) {
+        initialScanDao.deleteEmbeddings(sessionId)
+        initialScanDao.deleteSession(sessionId)
     }
 }

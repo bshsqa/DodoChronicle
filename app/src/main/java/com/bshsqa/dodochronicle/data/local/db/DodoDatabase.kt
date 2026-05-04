@@ -14,11 +14,13 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         PhotoRecordEntity::class,
         PendingPhotoEntity::class,
         RejectedPhotoEntity::class,
+        InitialScanSessionEntity::class,
+        InitialScanPhotoEmbeddingEntity::class,
         KakaoRoomEntity::class,
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -27,6 +29,7 @@ abstract class DodoDatabase : RoomDatabase() {
     abstract fun photoRecordDao(): PhotoRecordDao
     abstract fun pendingPhotoDao(): PendingPhotoDao
     abstract fun rejectedPhotoDao(): RejectedPhotoDao
+    abstract fun initialScanDao(): InitialScanDao
     abstract fun kakaoRoomDao(): KakaoRoomDao
     abstract fun kakaoMessageDao(): KakaoMessageDao
     abstract fun retryChunkDao(): RetryChunkDao
@@ -134,6 +137,42 @@ abstract class DodoDatabase : RoomDatabase() {
                 )
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_childId ON rejected_photos(childId)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_addedAtSeconds ON rejected_photos(addedAtSeconds)")
+            }
+        }
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS initial_scan_sessions (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        childName TEXT NOT NULL,
+                        birthDate TEXT NOT NULL,
+                        gender TEXT NOT NULL,
+                        referencePhotoUri TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        startedAt INTEGER NOT NULL,
+                        completedAt INTEGER,
+                        totalCount INTEGER NOT NULL,
+                        processedCount INTEGER NOT NULL,
+                        elapsedSeconds INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS initial_scan_photo_embeddings (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        sessionId TEXT NOT NULL,
+                        uri TEXT NOT NULL,
+                        takenAt INTEGER NOT NULL,
+                        embeddingJson TEXT NOT NULL,
+                        clusterId INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_sessionId ON initial_scan_photo_embeddings(sessionId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_clusterId ON initial_scan_photo_embeddings(clusterId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_uri ON initial_scan_photo_embeddings(uri)")
             }
         }
     }
