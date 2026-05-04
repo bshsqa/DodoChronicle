@@ -24,6 +24,8 @@ import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
 import com.bshsqa.dodochronicle.domain.usecase.CheckMissingPhotosUseCase
+import com.bshsqa.dodochronicle.domain.usecase.ExportEventsUseCase
+import com.bshsqa.dodochronicle.domain.usecase.ImportEventsUseCase
 import com.bshsqa.dodochronicle.domain.usecase.RetryFailedChunksUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PhotoCandidate
@@ -105,7 +107,8 @@ data class TimelineUiState(
     val searchDraftQuery: String = "",
     val isContextSearchDraft: Boolean = false,
     val contextSearchSort: ContextSearchSort = ContextSearchSort.DATE,
-    val contextUpdateProgress: ImportProgress? = null
+    val contextUpdateProgress: ImportProgress? = null,
+    val isEventImportRunning: Boolean = false
 )
 
 @HiltViewModel
@@ -116,6 +119,8 @@ class TimelineViewModel @Inject constructor(
     private val kakaoRepository: KakaoRepository,
     private val manageEventUseCase: ManageEventUseCase,
     private val checkMissingPhotosUseCase: CheckMissingPhotosUseCase,
+    private val exportEventsUseCase: ExportEventsUseCase,
+    private val importEventsUseCase: ImportEventsUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val importStateHolder: ImportStateHolder,
@@ -859,6 +864,43 @@ class TimelineViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    fun exportEvents(onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val json = exportEventsUseCase()
+                onReady(json)
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbar = e.message ?: "이벤트 내보내기에 실패했습니다") }
+            }
+        }
+    }
+
+    fun importEventsFromUrl(url: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isEventImportRunning = true) }
+            try {
+                val result = importEventsUseCase(url)
+                _state.update {
+                    it.copy(
+                        isEventImportRunning = false,
+                        snackbar = "이벤트 ${result.imported}개를 가져왔습니다. 중복 ${result.duplicates}개, 오류 ${result.skipped}개는 제외했습니다."
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isEventImportRunning = false,
+                        snackbar = e.message ?: "이벤트 가져오기에 실패했습니다"
+                    )
+                }
+            }
+        }
+    }
+
+    fun showSnackbar(message: String) {
+        _state.update { it.copy(snackbar = message) }
     }
 
     fun dismissSnackbar() = _state.update { it.copy(snackbar = null) }

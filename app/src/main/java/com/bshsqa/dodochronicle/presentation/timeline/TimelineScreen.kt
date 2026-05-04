@@ -31,6 +31,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -73,6 +74,7 @@ fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
     onNeedsInit: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showKakaoMenu by remember { mutableStateOf(false) }
@@ -82,6 +84,8 @@ fun TimelineScreen(
     var showPendingDialog by remember { mutableStateOf(false) }
     var showHiddenItemsDialog by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
+    var showImportEventsDialog by remember { mutableStateOf(false) }
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var selectedDetailDate by remember { mutableStateOf<LocalDate?>(null) }
     var fullscreenPhotos by remember { mutableStateOf<List<String>?>(null) }
     var fullscreenIndex by remember { mutableStateOf(0) }
@@ -109,6 +113,22 @@ fun TimelineScreen(
                 uris.add(uri)
             }
             if (uris.isNotEmpty()) viewModel.addManualPhotos(uris)
+        }
+    }
+    val exportEventsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val json = pendingExportJson
+        pendingExportJson = null
+        if (uri != null && json != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(json.toByteArray(Charsets.UTF_8))
+                } ?: error("파일을 열 수 없습니다")
+                viewModel.showSnackbar("이벤트 파일을 저장했습니다")
+            } catch (_: Exception) {
+                viewModel.showSnackbar("이벤트 파일 저장에 실패했습니다")
+            }
         }
     }
 
@@ -377,7 +397,7 @@ fun TimelineScreen(
                 }
             }
 
-            if (state.isPhotoSyncRunning || state.isMissingPhotoCheckRunning) {
+            if (state.isPhotoSyncRunning || state.isMissingPhotoCheckRunning || state.isEventImportRunning) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -405,7 +425,9 @@ fun TimelineScreen(
                         )
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
-                            if (state.isMissingPhotoCheckRunning) {
+                            if (state.isEventImportRunning) {
+                                "이벤트 가져오는 중..."
+                            } else if (state.isMissingPhotoCheckRunning) {
                                 "사진 원본 확인 중..."
                             } else {
                                 "신규 사진 분석 중..."
@@ -543,6 +565,18 @@ fun TimelineScreen(
                 showSettingsMenu = false
                 viewModel.updateSearchContexts()
             },
+            onExportEvents = {
+                showSettingsMenu = false
+                viewModel.exportEvents { json ->
+                    pendingExportJson = json
+                    val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    exportEventsLauncher.launch("dodochronicle-events-$today.json")
+                }
+            },
+            onImportEvents = {
+                showSettingsMenu = false
+                showImportEventsDialog = true
+            },
             onReset = {
                 showSettingsMenu = false
                 showResetConfirm = true
@@ -592,6 +626,16 @@ fun TimelineScreen(
             onConfirm = { acceptedUris, rejectedUris ->
                 viewModel.processPendingPhotos(acceptedUris, rejectedUris)
                 showPendingDialog = false
+            }
+        )
+    }
+
+    if (showImportEventsDialog) {
+        ImportEventsDialog(
+            onDismiss = { showImportEventsDialog = false },
+            onImport = { url ->
+                showImportEventsDialog = false
+                viewModel.importEventsFromUrl(url)
             }
         )
     }
@@ -944,6 +988,39 @@ private fun PendingPhotosDialog(
                     onConfirm(accepted, rejected)
                 }
             ) { Text("적용") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun ImportEventsDialog(
+    onDismiss: () -> Unit,
+    onImport: (String) -> Unit
+) {
+    var url by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("이벤트 가져오기") },
+        text = {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                label = { Text("공유 링크") },
+                placeholder = { Text("https://drive.google.com/...") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onImport(url.trim()) },
+                enabled = url.isNotBlank()
+            ) { Text("가져오기") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("취소") }
@@ -1894,6 +1971,8 @@ private fun SettingsMenuDialog(
     onPendingPhotos: () -> Unit,
     onHiddenItems: () -> Unit,
     onContextUpdate: () -> Unit,
+    onExportEvents: () -> Unit,
+    onImportEvents: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1982,6 +2061,30 @@ private fun SettingsMenuDialog(
                     Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("문맥 업데이트", modifier = Modifier.weight(1f))
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onExportEvents,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("이벤트 내보내기", modifier = Modifier.weight(1f))
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onImportEvents,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("이벤트 가져오기", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
                 TextButton(
