@@ -239,7 +239,7 @@ private fun ScanningStep(state: InitUiState, vm: InitViewModel) {
                 contentDescription = null,
                 modifier = Modifier
                     .size(112.dp)
-                    .clip(RoundedCornerShape(24.dp)),
+                    .clip(RoundedCornerShape(36.dp)),
                 contentScale = ContentScale.Crop
             )
             Spacer(Modifier.height(28.dp))
