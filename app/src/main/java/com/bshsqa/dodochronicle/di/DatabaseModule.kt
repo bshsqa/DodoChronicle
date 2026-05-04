@@ -26,7 +26,8 @@ object DatabaseModule {
                 DodoDatabase.MIGRATION_5_6,
                 DodoDatabase.MIGRATION_6_7,
                 DodoDatabase.MIGRATION_7_8,
-                DodoDatabase.MIGRATION_8_9
+                DodoDatabase.MIGRATION_8_9,
+                DodoDatabase.MIGRATION_9_10
             )
             .fallbackToDestructiveMigration()
             .build()

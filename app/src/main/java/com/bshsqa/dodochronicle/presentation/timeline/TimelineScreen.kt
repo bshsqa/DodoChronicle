@@ -51,6 +51,8 @@ import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class ZoomLevel { YEAR, MONTH, WEEK, DAY }
 
@@ -108,6 +110,7 @@ fun TimelineScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(state.snackbar) {
         state.snackbar?.let {
@@ -278,6 +281,7 @@ fun TimelineScreen(
                         searchQuery = state.searchQuery,
                         isContextSearch = state.isContextSearch,
                         contextSearchSort = state.contextSearchSort,
+                        photoRecordsByEventId = state.photoRecordsByEventId,
                         onDayClick = { date -> selectedDetailDate = date },
                         modifier = Modifier.weight(1f)
                     )
@@ -347,7 +351,7 @@ fun TimelineScreen(
                 }
             }
 
-            if (state.isPhotoSyncRunning) {
+            if (state.isPhotoSyncRunning || state.isMissingPhotoCheckRunning) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -367,7 +371,11 @@ fun TimelineScreen(
                     ) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
-                            "신규 사진 분석 중...",
+                            if (state.isMissingPhotoCheckRunning) {
+                                "사진 원본 확인 중..."
+                            } else {
+                                "신규 사진 분석 중..."
+                            },
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold
@@ -415,6 +423,11 @@ fun TimelineScreen(
             onPhotoClick = { photos, index ->
                 fullscreenPhotos = photos
                 fullscreenIndex = index
+            },
+            onMissingPhotoClick = {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("원본 사진을 찾을 수 없습니다")
+                }
             }
         )
     }
@@ -479,6 +492,11 @@ fun TimelineScreen(
                 viewModel.startManualScan()
             },
             isScanRunning = state.isPhotoSyncRunning,
+            isMissingPhotoCheckRunning = state.isMissingPhotoCheckRunning,
+            onCheckMissingPhotos = {
+                showSettingsMenu = false
+                viewModel.checkMissingPhotos()
+            },
             onPendingPhotos = {
                 showSettingsMenu = false
                 showPendingDialog = true
@@ -985,6 +1003,7 @@ private fun GroupedTimelineContent(
     searchQuery: String,
     isContextSearch: Boolean,
     contextSearchSort: ContextSearchSort,
+    photoRecordsByEventId: Map<String, PhotoRecord>,
     onDayClick: (LocalDate) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -997,6 +1016,19 @@ private fun GroupedTimelineContent(
         }
     }
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    var showJumpButtons by remember { mutableStateOf(false) }
+    val currentIndex by remember {
+        derivedStateOf {
+            when {
+                grouped.isEmpty() -> 0
+                !listState.canScrollBackward -> 0
+                !listState.canScrollForward -> grouped.lastIndex
+                else -> listState.firstVisibleItemIndex.coerceIn(0, grouped.lastIndex)
+            }
+        }
+    }
+    val showFastScroller = grouped.size >= 8
 
     LaunchedEffect(searchQuery, isContextSearch, contextSearchSort) {
         if (searchQuery.isNotBlank()) {
@@ -1004,20 +1036,193 @@ private fun GroupedTimelineContent(
         }
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(grouped, key = { it.key.toString() }) { (date, dayEvents) ->
-            DailyEventCard(
-                date = date,
-                events = dayEvents,
-                searchQuery = searchQuery,
-                isContextSearch = isContextSearch,
-                onClick = { onDayClick(date) }
+    LaunchedEffect(listState.isScrollInProgress, showFastScroller) {
+        if (!showFastScroller) {
+            showJumpButtons = false
+            return@LaunchedEffect
+        }
+        if (listState.isScrollInProgress) {
+            showJumpButtons = true
+        } else if (showJumpButtons) {
+            delay(2500L)
+            showJumpButtons = false
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(grouped, key = { it.key.toString() }) { (date, dayEvents) ->
+                DailyEventCard(
+                    date = date,
+                    events = dayEvents,
+                    searchQuery = searchQuery,
+                    isContextSearch = isContextSearch,
+                    photoRecordsByEventId = photoRecordsByEventId,
+                    onClick = { onDayClick(date) }
+                )
+            }
+        }
+
+        if (showFastScroller) {
+            TimelineFastScroller(
+                groupCount = grouped.size,
+                currentIndex = currentIndex,
+                labelForIndex = { index ->
+                    grouped[index.coerceIn(grouped.indices)].key.format(DateTimeFormatter.ofPattern("yyyy. M. d"))
+                },
+                onJumpToIndex = { index ->
+                    coroutineScope.launch {
+                        listState.scrollToItem(index.coerceIn(grouped.indices))
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(top = 8.dp, bottom = 96.dp)
             )
+
+            AnimatedVisibility(
+                visible = showJumpButtons,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 18.dp, bottom = 86.dp)
+            ) {
+                TimelineJumpButtons(
+                    onJumpToTop = {
+                        coroutineScope.launch { listState.animateScrollToItem(0) }
+                    },
+                    onJumpToBottom = {
+                        coroutineScope.launch { listState.animateScrollToItem(grouped.lastIndex) }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimelineJumpButtons(
+    onJumpToTop: () -> Unit,
+    onJumpToBottom: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(999.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            IconButton(
+                onClick = onJumpToTop,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "맨 위로")
+            }
+            IconButton(
+                onClick = onJumpToBottom,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "맨 아래로")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimelineFastScroller(
+    groupCount: Int,
+    currentIndex: Int,
+    labelForIndex: (Int) -> String,
+    onJumpToIndex: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+
+    BoxWithConstraints(
+        modifier = modifier.width(30.dp),
+        contentAlignment = Alignment.TopEnd
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            val density = LocalDensity.current
+            val trackHeightPx = with(density) { maxHeight.toPx() }
+            val handleHeight = 58.dp
+            fun indexForY(y: Float): Int {
+                val ratio = (y / trackHeightPx).coerceIn(0f, 1f)
+                return (ratio * (groupCount - 1)).toInt().coerceIn(0, groupCount - 1)
+            }
+
+            val thumbIndex = draggingIndex ?: currentIndex
+            val thumbY = if (groupCount <= 1) {
+                0.dp
+            } else {
+                (maxHeight - handleHeight) * (thumbIndex.toFloat() / (groupCount - 1).toFloat())
+            }
+            val activeIndex = thumbIndex
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(groupCount) {
+                        detectVerticalDragGestures(
+                            onDragStart = { offset ->
+                                val index = indexForY(offset.y)
+                                draggingIndex = index
+                                onJumpToIndex(index)
+                            },
+                            onVerticalDrag = { change, _ ->
+                                val index = indexForY(change.position.y)
+                                draggingIndex = index
+                                onJumpToIndex(index)
+                            },
+                            onDragEnd = { draggingIndex = null },
+                            onDragCancel = { draggingIndex = null }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {}
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(y = thumbY)
+                    .width(5.dp)
+                    .height(handleHeight)
+                    .clip(RoundedCornerShape(topStart = 999.dp, bottomStart = 999.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.88f))
+            )
+
+            if (draggingIndex != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    tonalElevation = 2.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-22).dp, y = thumbY + 12.dp)
+                ) {
+                    Text(
+                        labelForIndex(activeIndex),
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }
@@ -1028,6 +1233,7 @@ private fun DailyEventCard(
     events: List<Event>,
     searchQuery: String,
     isContextSearch: Boolean,
+    photoRecordsByEventId: Map<String, PhotoRecord>,
     onClick: () -> Unit
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
@@ -1066,13 +1272,20 @@ private fun DailyEventCard(
             if (photos.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     photos.take(4).forEachIndexed { idx, event ->
+                        val isMissing = photoRecordsByEventId[event.id]?.isMissing == true
                         Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
-                            AsyncImage(
-                                model = event.content,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Crop
-                            )
+                            if (isMissing) {
+                                MissingPhotoPlaceholder(
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
+                                )
+                            } else {
+                                AsyncImage(
+                                    model = event.content,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
                             // 4장 이상이면 마지막 썸네일에 "+N" 오버레이
                             if (idx == 3 && photos.size > 4) {
                                 Box(
@@ -1124,6 +1337,40 @@ private fun DailyEventCard(
     }
 }
 
+@Composable
+private fun MissingPhotoPlaceholder(
+    modifier: Modifier = Modifier,
+    label: String? = null
+) {
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(6.dp)
+        ) {
+            Icon(
+                Icons.Default.BrokenImage,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+            if (label != null) {
+                Text(
+                    label,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // 날짜 상세 다이얼로그 (사진 다중선택 + 학습 제외)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1143,7 +1390,8 @@ private fun DailyDetailDialog(
     onSetFavoriteBatch: (List<String>, Boolean) -> Unit,
     onHideTextEvent: (Event) -> Unit,
     onShowDevicePhotos: () -> Unit,
-    onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> }
+    onPhotoClick: (photos: List<String>, index: Int) -> Unit = { _, _ -> },
+    onMissingPhotoClick: () -> Unit = {}
 ) {
     val photos = events.filter { it.category == EventCategory.PHOTO }
     val texts  = events.filter { it.category != EventCategory.PHOTO }
@@ -1241,7 +1489,9 @@ private fun DailyDetailDialog(
                         ) {
                             gridItems(photos, key = { it.id }) { event ->
                                 val isSelected = event.id in selectedIds
-                                val isExcluded = photoRecordsByEventId[event.id]?.isExcludedFromModel ?: false
+                                val photoRecord = photoRecordsByEventId[event.id]
+                                val isExcluded = photoRecord?.isExcludedFromModel ?: false
+                                val isMissing = photoRecord?.isMissing == true
 
                                 Box(
                                     modifier = Modifier
@@ -1254,10 +1504,17 @@ private fun DailyDetailDialog(
                                                         selectedIds - event.id
                                                     else selectedIds + event.id
                                                 } else {
-                                                    onPhotoClick(
-                                                        photos.map { it.content },
-                                                        photos.indexOf(event).coerceAtLeast(0)
-                                                    )
+                                                    if (isMissing) {
+                                                        onMissingPhotoClick()
+                                                    } else {
+                                                        val availablePhotos = photos.filter {
+                                                            photoRecordsByEventId[it.id]?.isMissing != true
+                                                        }
+                                                        onPhotoClick(
+                                                            availablePhotos.map { it.content },
+                                                            availablePhotos.indexOf(event).coerceAtLeast(0)
+                                                        )
+                                                    }
                                                 }
                                             },
                                             onLongClick = {
@@ -1265,12 +1522,19 @@ private fun DailyDetailDialog(
                                             }
                                         )
                                 ) {
-                                    AsyncImage(
-                                        model = event.content,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
+                                    if (isMissing) {
+                                        MissingPhotoPlaceholder(
+                                            modifier = Modifier.fillMaxSize(),
+                                            label = "원본 없음"
+                                        )
+                                    } else {
+                                        AsyncImage(
+                                            model = event.content,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
                                     // 선택 오버레이
                                     if (isSelectMode) {
                                         if (isSelected) {
@@ -1583,6 +1847,8 @@ private fun SettingsMenuDialog(
     onRetry: () -> Unit,
     onScan: () -> Unit,
     isScanRunning: Boolean,
+    isMissingPhotoCheckRunning: Boolean,
+    onCheckMissingPhotos: () -> Unit,
     onPendingPhotos: () -> Unit,
     onHiddenItems: () -> Unit,
     onContextUpdate: () -> Unit,
@@ -1635,6 +1901,19 @@ private fun SettingsMenuDialog(
                         if (isScanRunning) "사진 분석 중..." else "신규 사진 로딩",
                         modifier = Modifier.weight(1f)
                     )
+                }
+                HorizontalDivider()
+                TextButton(
+                    onClick = onCheckMissingPhotos,
+                    enabled = !isScanRunning && !isMissingPhotoCheckRunning,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.BrokenImage, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("사진 원본 확인", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
                 if (pendingPhotoCount > 0) {

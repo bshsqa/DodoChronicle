@@ -59,6 +59,8 @@ class EventRepositoryImpl @Inject constructor(
         photoDao.insertAll(records.map { it.toEntity() })
     override suspend fun getLatestPhotoTakenAt(): Long? = photoDao.getLatestTakenAt()
     override suspend fun getAllPhotoUris(): List<String> = photoDao.getAllUris()
+    override suspend fun getAllPhotoRecords(): List<PhotoRecord> =
+        photoDao.getAll().map { it.toDomain() }
     override suspend fun getAllPendingPhotoUris(): List<String> = pendingPhotoDao.getAllUris()
     override fun observePendingPhotosForChild(childId: String): Flow<List<PendingPhoto>> =
         pendingPhotoDao.observeForChild(childId).map { list -> list.map { it.toDomain() } }
@@ -76,6 +78,12 @@ class EventRepositoryImpl @Inject constructor(
     override suspend fun deleteAllPhotoRecords() = photoDao.deleteAll()
     override suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean) =
         photoDao.setExcludedFromModel(photoRecordId, excluded)
+    override suspend fun updatePhotoMissingState(
+        photoRecordId: String,
+        isMissing: Boolean,
+        checkedAt: Long,
+        lastSeenAt: Long
+    ) = photoDao.updateMissingState(photoRecordId, isMissing, lastSeenAt, checkedAt)
     override suspend fun getLatest50Embeddings(childId: String): List<FloatArray> =
         photoDao.getLatest50Embeddings(childId).map { json ->
             try { Json.decodeFromString<List<Float>>(json).toFloatArray() } catch (e: Exception) { floatArrayOf() }
@@ -129,14 +137,20 @@ class EventRepositoryImpl @Inject constructor(
         id = id, eventId = eventId, localUri = localUri, takenAt = takenAt,
         faceEmbedding = try { Json.decodeFromString<List<Float>>(faceEmbeddingJson).toFloatArray() } catch (e: Exception) { floatArrayOf() },
         similarityScore = similarityScore,
-        isExcludedFromModel = isExcludedFromModel
+        isExcludedFromModel = isExcludedFromModel,
+        isMissing = isMissing,
+        lastSeenAt = lastSeenAt,
+        missingCheckedAt = missingCheckedAt
     )
 
     private fun PhotoRecord.toEntity() = PhotoRecordEntity(
         id = id, eventId = eventId, localUri = localUri, takenAt = takenAt,
         faceEmbeddingJson = Json.encodeToString(faceEmbedding.toList()),
         similarityScore = similarityScore,
-        isExcludedFromModel = isExcludedFromModel
+        isExcludedFromModel = isExcludedFromModel,
+        isMissing = isMissing,
+        lastSeenAt = lastSeenAt,
+        missingCheckedAt = missingCheckedAt
     )
 
     private fun PendingPhotoEntity.toDomain() = PendingPhoto(

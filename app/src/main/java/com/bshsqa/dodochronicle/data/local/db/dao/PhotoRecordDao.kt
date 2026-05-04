@@ -19,6 +19,9 @@ interface PhotoRecordDao {
     @Query("SELECT localUri FROM photo_records")
     suspend fun getAllUris(): List<String>
 
+    @Query("SELECT * FROM photo_records")
+    suspend fun getAll(): List<PhotoRecordEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(record: PhotoRecordEntity)
 
@@ -35,10 +38,25 @@ interface PhotoRecordDao {
     suspend fun setExcludedFromModel(id: String, excluded: Boolean)
 
     @Query("""
+        UPDATE photo_records
+        SET isMissing = :isMissing,
+            lastSeenAt = :lastSeenAt,
+            missingCheckedAt = :checkedAt
+        WHERE id = :id
+    """)
+    suspend fun updateMissingState(
+        id: String,
+        isMissing: Boolean,
+        lastSeenAt: Long,
+        checkedAt: Long
+    )
+
+    @Query("""
         SELECT photo_records.faceEmbeddingJson FROM photo_records
         INNER JOIN events ON events.id = photo_records.eventId
         WHERE events.childId = :childId
         AND photo_records.isExcludedFromModel = 0
+        AND photo_records.isMissing = 0
         ORDER BY takenAt DESC
         LIMIT 50
     """)

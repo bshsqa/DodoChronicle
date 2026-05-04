@@ -22,5 +22,8 @@ data class PhotoRecordEntity(
     val takenAt: Long,
     val faceEmbeddingJson: String = "[]",
     val similarityScore: Float = 0f,
-    val isExcludedFromModel: Boolean = false
+    val isExcludedFromModel: Boolean = false,
+    val isMissing: Boolean = false,
+    val lastSeenAt: Long = 0L,
+    val missingCheckedAt: Long = 0L
 )

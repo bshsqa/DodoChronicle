@@ -17,7 +17,7 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -108,6 +108,13 @@ abstract class DodoDatabase : RoomDatabase() {
                 )
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_childId ON pending_photos(childId)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_createdAt ON pending_photos(createdAt)")
+            }
+        }
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE photo_records ADD COLUMN isMissing INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE photo_records ADD COLUMN lastSeenAt INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE photo_records ADD COLUMN missingCheckedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

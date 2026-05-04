@@ -23,6 +23,7 @@ import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.repository.KakaoRepository
 import com.bshsqa.dodochronicle.domain.repository.RetryChunkRepository
 import com.bshsqa.dodochronicle.domain.usecase.ManageEventUseCase
+import com.bshsqa.dodochronicle.domain.usecase.CheckMissingPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.RetryFailedChunksUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PhotoCandidate
@@ -88,6 +89,7 @@ data class TimelineUiState(
     val snackbar: String? = null,
     val isLoading: Boolean = false,
     val isPhotoSyncRunning: Boolean = false,
+    val isMissingPhotoCheckRunning: Boolean = false,
     val pendingDialogRequestId: Int = 0,
     val importProgress: ImportProgress? = null,
     val importDone: ImportDoneInfo? = null,
@@ -113,6 +115,7 @@ class TimelineViewModel @Inject constructor(
     private val eventRepository: EventRepository,
     private val kakaoRepository: KakaoRepository,
     private val manageEventUseCase: ManageEventUseCase,
+    private val checkMissingPhotosUseCase: CheckMissingPhotosUseCase,
     private val syncUseCase: SyncNewPhotosUseCase,
     private val updateEmbeddingUseCase: UpdateChildEmbeddingUseCase,
     private val importStateHolder: ImportStateHolder,
@@ -749,6 +752,31 @@ class TimelineViewModel @Inject constructor(
     fun startManualScan() {
         viewModelScope.launch {
             syncNewPhotos(manual = true)
+        }
+    }
+
+    fun checkMissingPhotos() {
+        viewModelScope.launch {
+            _state.update { it.copy(isMissingPhotoCheckRunning = true) }
+            try {
+                val result = checkMissingPhotosUseCase()
+                if (result.missing > 0 || result.restored > 0) {
+                    updateEmbeddingUseCase(childId)
+                }
+                val message = when {
+                    result.checked == 0 -> "확인할 사진이 없습니다"
+                    result.missing > 0 && result.restored > 0 ->
+                        "원본을 찾을 수 없는 사진 ${result.missing}장, 복구된 사진 ${result.restored}장"
+                    result.missing > 0 -> "원본을 찾을 수 없는 사진 ${result.missing}장을 표시했습니다"
+                    result.restored > 0 -> "사진 ${result.restored}장의 원본을 다시 확인했습니다"
+                    else -> "모든 사진 원본을 확인했습니다"
+                }
+                _state.update { it.copy(isMissingPhotoCheckRunning = false, snackbar = message) }
+            } catch (_: Exception) {
+                _state.update {
+                    it.copy(isMissingPhotoCheckRunning = false, snackbar = "사진 원본 확인에 실패했습니다")
+                }
+            }
         }
     }
 
