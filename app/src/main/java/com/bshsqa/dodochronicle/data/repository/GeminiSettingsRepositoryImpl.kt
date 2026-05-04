@@ -3,7 +3,6 @@ package com.bshsqa.dodochronicle.data.repository
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.model.GeminiModelOption
 import com.bshsqa.dodochronicle.domain.model.GeminiSettings
 import com.bshsqa.dodochronicle.domain.repository.GeminiSettingsRepository
@@ -103,11 +102,7 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
             return GeminiSettings(savedKey, normalizeModelId(savedModel))
         }
 
-        return if (BuildConfig.DEBUG && BuildConfig.GEMINI_API_KEY.isNotBlank()) {
-            GeminiSettings(BuildConfig.GEMINI_API_KEY, normalizeModelId(BuildConfig.GEMINI_DEFAULT_MODEL))
-        } else {
-            GeminiSettings()
-        }
+        return GeminiSettings()
     }
 
     private fun decodeModelOptions(json: String): List<GeminiModelOption> =
