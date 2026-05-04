@@ -1064,7 +1064,13 @@ private fun GeminiSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Gemini API 설정") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
                     if (apiKeyConfigured) {
                         "저장된 API 키가 있습니다. 새 키를 입력하지 않으면 기존 키를 유지합니다."
@@ -2148,7 +2154,13 @@ private fun SettingsMenuDialog(
         icon = { Icon(Icons.Default.Settings, contentDescription = null) },
         title = { Text("설정") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 TextButton(
                     onClick = onKakaoImport,
                     modifier = Modifier.fillMaxWidth(),

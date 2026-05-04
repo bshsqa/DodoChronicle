@@ -61,6 +61,7 @@ class ScanForegroundService : Service() {
         private const val WAKELOCK_TAG = "DodoChronicle::ScanWakeLock"
         private const val WAKELOCK_TIMEOUT_MS = 12 * 60 * 60 * 1000L
         private const val CHECKPOINT_SIZE = 500
+        private const val UI_PROGRESS_UPDATE_INTERVAL = 10
         private const val CLUSTER_THRESHOLD = 0.68f
         private const val MAX_REPRESENTATIVE_URIS = 9
 
@@ -154,9 +155,20 @@ class ScanForegroundService : Service() {
             val now = System.currentTimeMillis()
             initialScanDao.updateItems(items.map { it.copy(status = STATUS_PROCESSING, updatedAt = now) })
 
-            val processedItems = items.map { item ->
+            val processedItems = mutableListOf<InitialScanItemEntity>()
+            for (item in items) {
                 currentCoroutineContext().ensureActive()
-                processItem(item, clusters)
+                processedItems += processItem(item, clusters)
+                val visibleProcessed = processed + processedItems.size
+                val elapsedSeconds = session.elapsedSeconds + (System.currentTimeMillis() - runStartedAt) / 1000
+                if (processedItems.size % UI_PROGRESS_UPDATE_INTERVAL == 0 || visibleProcessed == total) {
+                    stateHolder.emit(ScanState.Running(visibleProcessed, total, elapsedSeconds, sessionId))
+                    val currentPercent = if (total > 0) visibleProcessed * 100 / total else 0
+                    if (currentPercent != lastNotifiedPercent) {
+                        lastNotifiedPercent = currentPercent
+                        updateProgressNotification(visibleProcessed, total)
+                    }
+                }
             }
 
             processed += processedItems.size
