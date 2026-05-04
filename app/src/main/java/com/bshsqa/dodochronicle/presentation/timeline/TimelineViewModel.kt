@@ -833,7 +833,41 @@ class TimelineViewModel @Inject constructor(
         query.trim()
             .lowercase()
             .split("\\s+".toRegex())
+            .flatMap { token -> normalizeContextSearchToken(token) }
+            .distinct()
+
+    private fun normalizeContextSearchToken(raw: String): List<String> {
+        val cleaned = raw
+            .replace(Regex("""^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$"""), "")
+            .trim()
+        if (cleaned.isBlank()) return emptyList()
+
+        val stripped = stripKoreanParticle(cleaned)
+        val candidates = listOf(cleaned, stripped)
+            .map { it.trim() }
             .filter { it.isNotBlank() }
+            .distinct()
+
+        return candidates.filter { token ->
+            token !in CONTEXT_SEARCH_STOPWORDS &&
+                token !in CONTEXT_SEARCH_WEAK_ONE_SYLLABLES &&
+                (token.length >= 2 || token in CONTEXT_SEARCH_ONE_SYLLABLE_KEYWORDS)
+        }
+    }
+
+    private fun stripKoreanParticle(token: String): String {
+        val particles = listOf(
+            "\uc73c\ub85c\ubd80\ud130", "\ub85c\ubd80\ud130", "\uc5d0\uc11c\ub294", "\uc5d0\uc11c", "\uc5d0\uac8c",
+            "\ud55c\ud14c", "\uc73c\ub85c", "\ubd80\ud130", "\uae4c\uc9c0", "\ucc98\ub7fc", "\ubcf4\ub2e4",
+            "\ud558\uace0", "\uc774\ub791", "\ub791", "\uc640", "\uacfc", "\uc740", "\ub294", "\uc774", "\uac00",
+            "\uc744", "\ub97c", "\uc5d0", "\ub85c", "\ub3c4", "\ub9cc", "\uc758"
+        )
+        return particles.firstNotNullOfOrNull { particle ->
+            token
+                .takeIf { it.length > particle.length + 1 && it.endsWith(particle) }
+                ?.dropLast(particle.length)
+        } ?: token
+    }
 
     private fun debugLogContextSearch(query: String, scoredEvents: List<ContextSearchCandidate>) {
         val topMatches = scoredEvents.take(5).joinToString(separator = " | ") { candidate ->
@@ -849,4 +883,19 @@ class TimelineViewModel @Inject constructor(
 private data class ContextSearchCandidate(
     val event: Event,
     val score: Int
+)
+
+private val CONTEXT_SEARCH_STOPWORDS = setOf(
+    "\uac83", "\uac70", "\ub54c", "\ub0a0", "\uad00\ub828", "\uae30\ub85d", "\uc77c\uc0c1",
+    "\uc624\ub298", "\uc5b4\uc81c", "\ub0b4\uc77c", "\uc544\uc774", "\uc544\uae30", "\uc6b0\ub9ac",
+    "\uc5c4\ub9c8", "\uc544\ube60"
+)
+
+private val CONTEXT_SEARCH_WEAK_ONE_SYLLABLES = setOf(
+    "\uac10", "\uc634", "\ubd04", "\ud568", "\ub428", "\uac04", "\uc628", "\ubcf8",
+    "\ud55c", "\ud560", "\uac00", "\uc640"
+)
+
+private val CONTEXT_SEARCH_ONE_SYLLABLE_KEYWORDS = setOf(
+    "\uc5f4", "\uc57d", "\ubc25", "\uc7a0", "\ub625", "\ud53c", "\ubb3c", "\ucc45", "\ub9d0"
 )

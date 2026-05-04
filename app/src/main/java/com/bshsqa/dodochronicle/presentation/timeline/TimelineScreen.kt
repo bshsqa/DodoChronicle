@@ -203,18 +203,32 @@ fun TimelineScreen(
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SingleChoiceSegmentedButtonRow {
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.widthIn(min = 184.dp)
+                            ) {
                                 SegmentedButton(
                                     selected = state.contextSearchSort == ContextSearchSort.DATE,
                                     onClick = { viewModel.setContextSearchSort(ContextSearchSort.DATE) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                                    label = { Text("날짜순") }
+                                    label = {
+                                        Text(
+                                            "날짜",
+                                            maxLines = 1,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
                                 )
                                 SegmentedButton(
                                     selected = state.contextSearchSort == ContextSearchSort.RELEVANCE,
                                     onClick = { viewModel.setContextSearchSort(ContextSearchSort.RELEVANCE) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                                    label = { Text("관련도순") }
+                                    label = {
+                                        Text(
+                                            "관련도",
+                                            maxLines = 1,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
                                 )
                             }
                         }
