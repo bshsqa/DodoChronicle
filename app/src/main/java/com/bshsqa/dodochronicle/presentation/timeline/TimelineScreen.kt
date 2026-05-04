@@ -1307,8 +1307,9 @@ private fun DailyEventCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     photos.take(4).forEachIndexed { idx, event ->
                         val isMissing = photoRecordsByEventId[event.id]?.isMissing == true
+                        var imageLoadFailed by remember(event.id, event.content) { mutableStateOf(false) }
                         Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
-                            if (isMissing) {
+                            if (isMissing || imageLoadFailed) {
                                 MissingPhotoPlaceholder(
                                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
                                 )
@@ -1317,7 +1318,8 @@ private fun DailyEventCard(
                                     model = event.content,
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
-                                    contentScale = ContentScale.Crop
+                                    contentScale = ContentScale.Crop,
+                                    onError = { imageLoadFailed = true }
                                 )
                             }
                             // 4장 이상이면 마지막 썸네일에 "+N" 오버레이
@@ -1439,6 +1441,7 @@ private fun DailyDetailDialog(
     val selectedExcludeStates = selectedPhotoRecords.map { it.isExcludedFromModel }
     val allSameExcludeState = selectedExcludeStates.toSet().size <= 1
     val currentExcludeState = selectedExcludeStates.firstOrNull() ?: false
+    val failedPhotoIds = remember(photos) { mutableStateListOf<String>() }
 
     AlertDialog(
         onDismissRequest = {
@@ -1525,7 +1528,7 @@ private fun DailyDetailDialog(
                                 val isSelected = event.id in selectedIds
                                 val photoRecord = photoRecordsByEventId[event.id]
                                 val isExcluded = photoRecord?.isExcludedFromModel ?: false
-                                val isMissing = photoRecord?.isMissing == true
+                                val isMissing = photoRecord?.isMissing == true || event.id in failedPhotoIds
 
                                 Box(
                                     modifier = Modifier
@@ -1566,7 +1569,12 @@ private fun DailyDetailDialog(
                                             model = event.content,
                                             contentDescription = null,
                                             modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
+                                            contentScale = ContentScale.Crop,
+                                            onError = {
+                                                if (event.id !in failedPhotoIds) {
+                                                    failedPhotoIds.add(event.id)
+                                                }
+                                            }
                                         )
                                     }
                                     // 선택 오버레이
@@ -2285,12 +2293,21 @@ private fun FullscreenPhotoViewer(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                AsyncImage(
-                    model = photos[page],
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
-                )
+                var imageLoadFailed by remember(photos[page]) { mutableStateOf(false) }
+                if (imageLoadFailed) {
+                    MissingPhotoPlaceholder(
+                        modifier = Modifier.fillMaxSize(),
+                        label = "원본 사진을 찾을 수 없음"
+                    )
+                } else {
+                    AsyncImage(
+                        model = photos[page],
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                        onError = { imageLoadFailed = true }
+                    )
+                }
             }
 
             // 닫기 버튼 (좌상단)

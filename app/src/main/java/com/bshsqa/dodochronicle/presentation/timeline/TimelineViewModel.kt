@@ -745,6 +745,13 @@ class TimelineViewModel @Inject constructor(
 
             if (accepted.isNotEmpty()) updateEmbeddingUseCase(childId)
 
+            if (rejected.isNotEmpty()) {
+                eventRepository.upsertRejectedPhotos(childId, rejected)
+            }
+            val maxAddedAt = currentPending.maxOfOrNull { it.addedAtSeconds }
+                ?: (dataStore.data.first()[AppPrefsKeys.LAST_PHOTO_SYNC_ADDED_AT_SECONDS] ?: 0L)
+            val minRejectedAddedAt = (maxAddedAt - PHOTO_SYNC_OVERLAP_SECONDS).coerceAtLeast(0L)
+            eventRepository.pruneRejectedPhotos(childId, minRejectedAddedAt)
             eventRepository.deletePendingPhotos(rejected.map { it.uri })
         }
     }
@@ -861,6 +868,7 @@ class TimelineViewModel @Inject constructor(
             if (childId.isNotEmpty()) {
                 eventRepository.deleteAllForChild(childId)
                 eventRepository.deleteAllPendingPhotosForChild(childId)
+                eventRepository.deleteAllRejectedPhotosForChild(childId)
             }
             eventRepository.deleteAllPhotoRecords()
             childRepository.deleteAll()

@@ -43,8 +43,11 @@ class SyncNewPhotosUseCase @Inject constructor(
 
         val existingUris = eventRepository.getAllPhotoUris().toSet()
         val pendingUris = eventRepository.getAllPendingPhotoUris().toSet()
+        val rejectedUris = eventRepository.getRejectedPhotoUris(child.id).toSet()
         val toProcess = newPhotoUris.filter { candidate ->
-            candidate.uri !in existingUris && candidate.uri !in pendingUris
+            candidate.uri !in existingUris &&
+                candidate.uri !in pendingUris &&
+                candidate.uri !in rejectedUris
         }
 
         var processed = 0

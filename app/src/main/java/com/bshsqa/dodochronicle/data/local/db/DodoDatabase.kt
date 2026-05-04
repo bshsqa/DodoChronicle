@@ -13,11 +13,12 @@ import com.bshsqa.dodochronicle.data.local.db.entity.*
         EventEntity::class,
         PhotoRecordEntity::class,
         PendingPhotoEntity::class,
+        RejectedPhotoEntity::class,
         KakaoRoomEntity::class,
         KakaoMessageEntity::class,
         RetryChunkEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class DodoDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class DodoDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun photoRecordDao(): PhotoRecordDao
     abstract fun pendingPhotoDao(): PendingPhotoDao
+    abstract fun rejectedPhotoDao(): RejectedPhotoDao
     abstract fun kakaoRoomDao(): KakaoRoomDao
     abstract fun kakaoMessageDao(): KakaoMessageDao
     abstract fun retryChunkDao(): RetryChunkDao
@@ -115,6 +117,23 @@ abstract class DodoDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE photo_records ADD COLUMN isMissing INTEGER NOT NULL DEFAULT 0")
                 database.execSQL("ALTER TABLE photo_records ADD COLUMN lastSeenAt INTEGER NOT NULL DEFAULT 0")
                 database.execSQL("ALTER TABLE photo_records ADD COLUMN missingCheckedAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS rejected_photos (
+                        uri TEXT NOT NULL PRIMARY KEY,
+                        childId TEXT NOT NULL,
+                        addedAtSeconds INTEGER NOT NULL,
+                        rejectedAt INTEGER NOT NULL,
+                        FOREIGN KEY(childId) REFERENCES children(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_childId ON rejected_photos(childId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_addedAtSeconds ON rejected_photos(addedAtSeconds)")
             }
         }
     }

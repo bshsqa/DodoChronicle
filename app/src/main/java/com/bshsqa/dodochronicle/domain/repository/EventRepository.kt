@@ -36,10 +36,14 @@ interface EventRepository {
     suspend fun getAllPhotoUris(): List<String>
     suspend fun getAllPhotoRecords(): List<PhotoRecord>
     suspend fun getAllPendingPhotoUris(): List<String>
+    suspend fun getRejectedPhotoUris(childId: String): List<String>
     fun observePendingPhotosForChild(childId: String): Flow<List<PendingPhoto>>
     suspend fun upsertPendingPhotos(childId: String, photos: List<PendingPhoto>)
+    suspend fun upsertRejectedPhotos(childId: String, photos: List<PendingPhoto>)
+    suspend fun pruneRejectedPhotos(childId: String, minAddedAtSeconds: Long)
     suspend fun deletePendingPhotos(uris: List<String>)
     suspend fun deleteAllPendingPhotosForChild(childId: String)
+    suspend fun deleteAllRejectedPhotosForChild(childId: String)
     suspend fun deleteAllPhotoRecords()
     suspend fun setPhotoExcludedFromModel(photoRecordId: String, excluded: Boolean)
     suspend fun updatePhotoMissingState(
