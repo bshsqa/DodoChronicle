@@ -347,6 +347,13 @@ class TimelineViewModel @Inject constructor(
         scanStateHolder.reset()
     }
 
+    private suspend fun clearAllInitialScanCache() {
+        initialScanDao.deleteAllEmbeddings()
+        initialScanDao.deleteAllItems()
+        initialScanDao.deleteAllClusters()
+        initialScanDao.deleteAllSessions()
+    }
+
     init {
         viewModelScope.launch {
             val child = childRepository.getFirst()
@@ -430,8 +437,18 @@ class TimelineViewModel @Inject constructor(
                                 )
                             }
                         }
-                        is ScanState.Failed -> _state.update {
-                            it.copy(isScanRunning = false, snackbar = scanState.message)
+                        is ScanState.Failed -> {
+                            clearAllInitialScanCache()
+                            scanStateHolder.reset()
+                            _state.update {
+                                it.copy(
+                                    isScanRunning = false,
+                                    initialScanBanner = null,
+                                    initialScanClusters = emptyList(),
+                                    selectedInitialScanClusterIds = emptySet(),
+                                    snackbar = scanState.message
+                                )
+                            }
                         }
                         else -> _state.update { it.copy(isScanRunning = false) }
                     }
@@ -1326,6 +1343,13 @@ class TimelineViewModel @Inject constructor(
 
     fun resetApp() {
         viewModelScope.launch {
+            context.startService(
+                Intent(context, ScanForegroundService::class.java).apply {
+                    action = ScanForegroundService.ACTION_CANCEL
+                }
+            )
+            scanStateHolder.reset()
+            clearAllInitialScanCache()
             if (childId.isNotEmpty()) {
                 eventRepository.deleteAllForChild(childId)
                 eventRepository.deleteAllPendingPhotosForChild(childId)
@@ -1336,7 +1360,15 @@ class TimelineViewModel @Inject constructor(
             kakaoRepository.deleteAll()
             retryChunkRepository.deleteAll()
             dataStore.edit { it.clear() }
-            _state.update { it.copy(needsInit = true) }
+            _state.update {
+                it.copy(
+                    needsInit = true,
+                    isScanRunning = false,
+                    initialScanBanner = null,
+                    initialScanClusters = emptyList(),
+                    selectedInitialScanClusterIds = emptySet()
+                )
+            }
         }
     }
 

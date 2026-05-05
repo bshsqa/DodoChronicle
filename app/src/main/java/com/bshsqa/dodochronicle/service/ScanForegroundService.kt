@@ -58,6 +58,7 @@ class ScanForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var activeSessionId: String? = null
 
     companion object {
         const val ACTION_START = "com.bshsqa.dodochronicle.action.SCAN_START"
@@ -101,6 +102,8 @@ class ScanForegroundService : Service() {
             return
         }
 
+        activeSessionId = sessionId
+
         startForeground(
             NOTIFICATION_ID,
             buildProgressNotification(0, 0),
@@ -118,15 +121,23 @@ class ScanForegroundService : Service() {
                 throw e
             } catch (t: Throwable) {
                 Log.e(TAG, "Initial scan stopped by unexpected error. sessionId=$sessionId", t)
+                initialScanDao.updateStatus(sessionId, STATUS_FAILED)
                 stateHolder.emit(ScanState.Failed("사진 분석 중 오류가 발생했습니다. 앱을 다시 열면 이어서 진행할 수 있습니다."))
             } finally {
+                if (activeSessionId == sessionId) activeSessionId = null
                 stopSelf()
             }
         }
     }
 
     private fun cancelScan() {
+        val sessionId = activeSessionId
         scanJob?.cancel()
+        if (sessionId != null) {
+            serviceScope.launch {
+                initialScanDao.updateStatus(sessionId, "CANCELLED")
+            }
+        }
         stateHolder.emit(ScanState.Cancelled)
         androidx.core.app.ServiceCompat.stopForeground(
             this,
@@ -144,6 +155,7 @@ class ScanForegroundService : Service() {
     private suspend fun performScan(sessionId: String) {
         val session = initialScanDao.getSession(sessionId)
         if (session == null) {
+            initialScanDao.updateStatus(sessionId, STATUS_FAILED)
             stateHolder.emit(ScanState.Failed("사진 분석 세션을 찾을 수 없습니다."))
             return
         }
@@ -197,6 +209,7 @@ class ScanForegroundService : Service() {
 
         val elapsedSeconds = session.elapsedSeconds + (System.currentTimeMillis() - runStartedAt) / 1000
         if (clusters.isEmpty()) {
+            initialScanDao.updateStatus(sessionId, STATUS_FAILED)
             stateHolder.emit(ScanState.Failed("얼굴이 감지된 사진이 없습니다. 사진을 다시 선택해주세요."))
             androidx.core.app.ServiceCompat.stopForeground(
                 this,
@@ -256,6 +269,8 @@ class ScanForegroundService : Service() {
             )
         }
         initialScanDao.updateProgress(sessionId, STATUS_RUNNING, photos.size, 0, 0L)
+        stateHolder.emit(ScanState.Running(0, photos.size, session?.elapsedSeconds ?: 0L, sessionId))
+        updateProgressNotification(0, photos.size)
     }
 
     private suspend fun processItem(

@@ -3,29 +3,65 @@ package com.bshsqa.dodochronicle.presentation.init
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Cake
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.bshsqa.dodochronicle.R
 import com.bshsqa.dodochronicle.domain.model.Gender
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,14 +78,12 @@ fun InitScreen(viewModel: InitViewModel, onInitComplete: () -> Unit) {
             targetState = state.step,
             transitionSpec = {
                 slideInHorizontally { it } + fadeIn() togetherWith
-                        slideOutHorizontally { -it } + fadeOut()
+                    slideOutHorizontally { -it } + fadeOut()
             },
             label = "init_step"
         ) { step ->
             when (step) {
                 is InitStep.ChildInfo -> ChildInfoStep(state, viewModel)
-                is InitStep.Scanning -> ScanningStep(state, viewModel)
-                is InitStep.ClusterSelect -> ClusterSelectStep(state, viewModel)
                 is InitStep.Done -> Box(Modifier.fillMaxSize())
             }
         }
@@ -104,7 +138,7 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
         )
         Text("아이 정보 입력", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "사진 분류를 시작하기 전에\n아이의 기본 정보를 알려주세요",
+            "사진 분류를 시작하기 전에\n아이의 기본 정보를 알려주세요.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -129,12 +163,18 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
                 )
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.AddAPhoto, contentDescription = null,
+                    Icon(
+                        Icons.Default.AddAPhoto,
+                        contentDescription = null,
                         modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.height(4.dp))
-                    Text("사진 선택", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "사진 선택",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -171,7 +211,6 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            @OptIn(ExperimentalMaterial3Api::class)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 SegmentedButton(
                     selected = state.gender == Gender.MALE,
@@ -200,10 +239,10 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
                 .fillMaxWidth()
                 .height(52.dp),
             shape = RoundedCornerShape(12.dp),
-            enabled = state.childName.isNotBlank()
-                    && state.birthDate != null
-                    && state.referencePhotoUri.isNotBlank()
-                    && state.gender != null
+            enabled = state.childName.isNotBlank() &&
+                state.birthDate != null &&
+                state.referencePhotoUri.isNotBlank() &&
+                state.gender != null
         ) {
             Icon(Icons.Default.Search, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -225,181 +264,11 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
                     showDatePicker = false
                 }) { Text("확인") }
             },
-            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("취소") } }
-        ) { DatePicker(state = dateState) }
-    }
-}
-
-@Composable
-private fun ScanningStep(state: InitUiState, vm: InitViewModel) {
-    val progress = if (state.totalCount > 0) state.scannedCount.toFloat() / state.totalCount else 0f
-    val percent = (progress * 100).toInt()
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) { /* 스캔 중 배경 제스처 차단 */ }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("취소") }
+            }
         ) {
-            Image(
-                painter = painterResource(R.drawable.dodo_loading),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(112.dp)
-                    .clip(RoundedCornerShape(36.dp)),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(Modifier.height(28.dp))
-            Text("사진 분석 중...", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "${state.scannedCount} / ${state.totalCount} 장 완료 ($percent%)",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "현재까지 ${formatElapsedTime(state.scanElapsedSeconds)} 소요",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(24.dp))
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth(),
-                strokeCap = StrokeCap.Round
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "얼굴 인식 중입니다. 잠시 기다려주세요.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(32.dp))
-            OutlinedButton(onClick = vm::cancelScanning) {
-                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("취소")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ClusterSelectStep(state: InitUiState, vm: InitViewModel) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(32.dp))
-        Text("아이 그룹 선택", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            if (state.restoredScanResult) {
-                "이전 사진 분석 결과를 불러왔습니다.\n총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요된 분석 결과입니다."
-            } else {
-                "사진 분석 완료 · 총 ${formatElapsedTime(state.scanElapsedSeconds)} 소요\n인식된 인물 그룹에서 아이의 그룹을 선택해주세요."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(16.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(state.clusters) { cluster ->
-                ClusterCard(
-                    cluster = cluster,
-                    isSelected = cluster.id in state.selectedClusterIds,
-                    onClick = { vm.toggleCluster(cluster.id) }
-                )
-            }
-        }
-
-        Button(
-            onClick = vm::confirmClusters,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            enabled = state.selectedClusterIds.isNotEmpty()
-        ) {
-            Icon(Icons.Default.Check, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("선택 완료 (${state.selectedClusterIds.size}개 그룹)", style = MaterialTheme.typography.titleMedium)
-        }
-    }
-}
-
-private fun formatElapsedTime(totalSeconds: Long): String {
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
-}
-
-@Composable
-private fun ClusterCard(cluster: ClusterUiModel, isSelected: Boolean, onClick: () -> Unit) {
-    val border = if (isSelected)
-        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-    else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-
-    Card(
-        modifier = Modifier.aspectRatio(1f).clickable { onClick() },
-        border = border,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = false
-            ) {
-                items(cluster.previewUris.take(9)) { uri ->
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = null,
-                        modifier = Modifier.aspectRatio(1f),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-            if (isSelected) {
-                Box(
-                    Modifier.align(Alignment.TopEnd).padding(6.dp)
-                        .size(24.dp)
-                        .background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = "선택됨",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(16.dp))
-                }
-            }
-            Box(
-                Modifier.align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
-                    .padding(4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("${cluster.count}장", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary)
-            }
+            DatePicker(state = dateState)
         }
     }
 }
