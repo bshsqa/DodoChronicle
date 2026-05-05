@@ -9,6 +9,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.ai.GeminiEventClassifier
+import com.bshsqa.dodochronicle.data.local.db.dao.InitialScanDao
+import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanItemEntity
 import com.bshsqa.dodochronicle.domain.model.ContextSearchSort
 import com.bshsqa.dodochronicle.domain.model.Event
 import com.bshsqa.dodochronicle.domain.model.EventCategory
@@ -32,6 +34,8 @@ import com.bshsqa.dodochronicle.domain.usecase.RetryFailedChunksUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PhotoCandidate
 import com.bshsqa.dodochronicle.domain.usecase.UpdateChildEmbeddingUseCase
+import com.bshsqa.dodochronicle.media.PhotoDateResolver
+import com.bshsqa.dodochronicle.media.PhotoDateSource
 import com.bshsqa.dodochronicle.service.ImportState
 import com.bshsqa.dodochronicle.service.ImportStateHolder
 import com.bshsqa.dodochronicle.service.KakaoImportService
@@ -52,6 +56,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 data class ImportProgress(
     val chunksDone: Int,
@@ -79,6 +85,23 @@ data class DeviceDayPhotos(
     val date: LocalDate,
     val uris: List<String>
 )
+
+data class InitialScanClusterUiModel(
+    val id: Int,
+    val previewUris: List<String>,
+    val count: Int
+)
+
+data class InitialScanBannerInfo(
+    val sessionId: String,
+    val status: String,
+    val processedCount: Int,
+    val totalCount: Int,
+    val elapsedSeconds: Long,
+    val clusterCount: Int = 0
+) {
+    val isCompleted: Boolean get() = status == "COMPLETED" || status == "PARTIALLY_APPLIED"
+}
 
 private const val PHOTO_SYNC_OVERLAP_SECONDS = 86_400L
 
@@ -115,7 +138,10 @@ data class TimelineUiState(
     val geminiApiKeyConfigured: Boolean = false,
     val selectedGeminiModelId: String = "",
     val geminiModelOptions: List<GeminiModelOption> = emptyList(),
-    val isGeminiModelLoading: Boolean = false
+    val isGeminiModelLoading: Boolean = false,
+    val initialScanBanner: InitialScanBannerInfo? = null,
+    val initialScanClusters: List<InitialScanClusterUiModel> = emptyList(),
+    val selectedInitialScanClusterIds: Set<Int> = emptySet()
 )
 
 @HiltViewModel
@@ -136,7 +162,9 @@ class TimelineViewModel @Inject constructor(
     private val retryFailedChunksUseCase: RetryFailedChunksUseCase,
     private val dataStore: DataStore<Preferences>,
     private val geminiClassifier: GeminiEventClassifier,
-    private val geminiSettingsRepository: GeminiSettingsRepository
+    private val geminiSettingsRepository: GeminiSettingsRepository,
+    private val initialScanDao: InitialScanDao,
+    private val photoDateResolver: PhotoDateResolver
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TimelineUiState())
@@ -151,6 +179,173 @@ class TimelineViewModel @Inject constructor(
     private var lastImportAlias: String = ""
     private var photoSyncInProgress: Boolean = false
     private var hasObservedPendingPhotos: Boolean = false
+
+    private suspend fun restoreOrResumeInitialScan() {
+        val session = initialScanDao.getResumableSession() ?: return
+        when (session.status) {
+            "PREPARING_ITEMS", "RUNNING", "PAUSED" -> {
+                _state.update {
+                    it.copy(
+                        isScanRunning = true,
+                        initialScanBanner = InitialScanBannerInfo(
+                            sessionId = session.id,
+                            status = session.status,
+                            processedCount = session.processedCount,
+                            totalCount = session.totalCount,
+                            elapsedSeconds = session.elapsedSeconds
+                        )
+                    )
+                }
+                context.startForegroundService(
+                    Intent(context, ScanForegroundService::class.java).apply {
+                        action = ScanForegroundService.ACTION_START
+                        putExtra(ScanForegroundService.EXTRA_SESSION_ID, session.id)
+                    }
+                )
+            }
+            "COMPLETED", "PARTIALLY_APPLIED" -> {
+                loadInitialScanClusters(session.id)
+                _state.update {
+                    it.copy(
+                        initialScanBanner = InitialScanBannerInfo(
+                            sessionId = session.id,
+                            status = session.status,
+                            processedCount = session.processedCount,
+                            totalCount = session.totalCount,
+                            elapsedSeconds = session.elapsedSeconds,
+                            clusterCount = it.initialScanClusters.size
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun loadInitialScanClusters(sessionId: String) {
+        val rows = initialScanDao.getProcessedItems(sessionId)
+        val previewUrisByCluster = initialScanDao.getClusters(sessionId).associate { row ->
+            val previews = runCatching {
+                Json.decodeFromString<List<String>>(row.representativeUrisJson)
+            }.getOrDefault(emptyList())
+            row.clusterId to previews
+        }
+        val clusters = rows
+            .groupBy { it.clusterId ?: -1 }
+            .filterKeys { it >= 0 }
+            .map { (clusterId, items) ->
+                InitialScanClusterUiModel(
+                    id = clusterId,
+                    previewUris = previewUrisByCluster[clusterId].orEmpty().ifEmpty {
+                        items.take(9).map { it.uri }
+                    },
+                    count = items.size
+                )
+            }
+            .sortedByDescending { it.count }
+        _state.update {
+            it.copy(
+                initialScanClusters = clusters,
+                selectedInitialScanClusterIds = it.selectedInitialScanClusterIds.intersect(
+                    clusters.map { cluster -> cluster.id }.toSet()
+                )
+            )
+        }
+    }
+
+    fun toggleInitialScanCluster(clusterId: Int) {
+        _state.update { state ->
+            val selected = if (clusterId in state.selectedInitialScanClusterIds) {
+                state.selectedInitialScanClusterIds - clusterId
+            } else {
+                state.selectedInitialScanClusterIds + clusterId
+            }
+            state.copy(selectedInitialScanClusterIds = selected)
+        }
+    }
+
+    fun addSelectedInitialScanClusters() {
+        viewModelScope.launch {
+            val banner = _state.value.initialScanBanner ?: return@launch
+            val selectedClusterIds = _state.value.selectedInitialScanClusterIds
+            if (selectedClusterIds.isEmpty()) {
+                _state.update { it.copy(snackbar = "추가할 사진 그룹을 선택해주세요") }
+                return@launch
+            }
+            val rows = initialScanDao.getProcessedItems(banner.sessionId)
+                .filter { it.clusterId in selectedClusterIds }
+            val events = mutableListOf<Event>()
+            val records = mutableListOf<PhotoRecord>()
+            rows.forEach { row ->
+                val embedding = row.embeddingJson.toFloatArrayOrNull() ?: return@forEach
+                val eventId = UUID.randomUUID().toString()
+                events += Event(
+                    id = eventId,
+                    childId = childId,
+                    date = Instant.ofEpochMilli(row.takenAt).atZone(ZoneId.systemDefault()).toLocalDate(),
+                    category = EventCategory.PHOTO,
+                    content = row.uri,
+                    source = EventSource.PHOTO
+                )
+                records += PhotoRecord(
+                    id = UUID.randomUUID().toString(),
+                    eventId = eventId,
+                    localUri = row.uri,
+                    takenAt = row.takenAt,
+                    faceEmbedding = embedding,
+                    similarityScore = 1f
+                )
+            }
+            eventRepository.insertAll(events)
+            eventRepository.insertAllPhotoRecords(records)
+            initialScanDao.deleteItemsByClusters(banner.sessionId, selectedClusterIds.toList())
+            initialScanDao.deleteClustersByIds(banner.sessionId, selectedClusterIds.toList())
+            updateEmbeddingUseCase(childId)
+            loadInitialScanClusters(banner.sessionId)
+            val remaining = _state.value.initialScanClusters.size
+            if (remaining == 0) {
+                clearInitialScanCache(banner.sessionId)
+                _state.update {
+                    it.copy(
+                        initialScanBanner = null,
+                        selectedInitialScanClusterIds = emptySet(),
+                        snackbar = "${events.size}장 사진을 추가했습니다"
+                    )
+                }
+            } else {
+                initialScanDao.updateStatus(banner.sessionId, "PARTIALLY_APPLIED")
+                _state.update {
+                    it.copy(
+                        initialScanBanner = banner.copy(status = "PARTIALLY_APPLIED", clusterCount = remaining),
+                        selectedInitialScanClusterIds = emptySet(),
+                        snackbar = "${events.size}장 사진을 추가했습니다"
+                    )
+                }
+            }
+        }
+    }
+
+    fun completeInitialScanSelection() {
+        viewModelScope.launch {
+            val sessionId = _state.value.initialScanBanner?.sessionId ?: return@launch
+            clearInitialScanCache(sessionId)
+            _state.update {
+                it.copy(
+                    initialScanBanner = null,
+                    initialScanClusters = emptyList(),
+                    selectedInitialScanClusterIds = emptySet(),
+                    snackbar = "초기 사진 그룹 선택을 완료했습니다"
+                )
+            }
+        }
+    }
+
+    private suspend fun clearInitialScanCache(sessionId: String) {
+        initialScanDao.deleteEmbeddings(sessionId)
+        initialScanDao.deleteItems(sessionId)
+        initialScanDao.deleteClusters(sessionId)
+        initialScanDao.deleteSession(sessionId)
+        scanStateHolder.reset()
+    }
 
     init {
         viewModelScope.launch {
@@ -167,6 +362,7 @@ class TimelineViewModel @Inject constructor(
                     birthDate = child.birthDate
                 )
             }
+            restoreOrResumeInitialScan()
 
             launch {
                 geminiSettingsRepository.settingsFlow.collect { settings ->
@@ -181,7 +377,9 @@ class TimelineViewModel @Inject constructor(
                 }
             }
 
-            launch { syncNewPhotos(manual = false) }
+            if (child.faceEmbeddings.isNotEmpty()) {
+                launch { syncNewPhotos(manual = false) }
+            }
 
             launch {
                 kakaoRepository.observeRooms().collect { rooms ->
@@ -202,7 +400,41 @@ class TimelineViewModel @Inject constructor(
 
             launch {
                 scanStateHolder.state.collect { scanState ->
-                    _state.update { it.copy(isScanRunning = scanState is ScanState.Running) }
+                    when (scanState) {
+                        is ScanState.Running -> _state.update {
+                            it.copy(
+                                isScanRunning = true,
+                                initialScanBanner = InitialScanBannerInfo(
+                                    sessionId = scanState.sessionId,
+                                    status = "RUNNING",
+                                    processedCount = scanState.processed,
+                                    totalCount = scanState.total,
+                                    elapsedSeconds = scanState.elapsedSeconds,
+                                    clusterCount = it.initialScanBanner?.clusterCount ?: 0
+                                )
+                            )
+                        }
+                        is ScanState.Done -> {
+                            loadInitialScanClusters(scanState.sessionId)
+                            _state.update {
+                                it.copy(
+                                    isScanRunning = false,
+                                    initialScanBanner = InitialScanBannerInfo(
+                                        sessionId = scanState.sessionId,
+                                        status = "COMPLETED",
+                                        processedCount = scanState.embeddings.size,
+                                        totalCount = scanState.embeddings.size,
+                                        elapsedSeconds = scanState.elapsedSeconds,
+                                        clusterCount = scanState.clusters.size
+                                    )
+                                )
+                            }
+                        }
+                        is ScanState.Failed -> _state.update {
+                            it.copy(isScanRunning = false, snackbar = scanState.message)
+                        }
+                        else -> _state.update { it.copy(isScanRunning = false) }
+                    }
                 }
             }
 
@@ -349,6 +581,17 @@ class TimelineViewModel @Inject constructor(
             if (manual) {
                 _state.update { it.copy(isPhotoSyncRunning = true) }
             }
+            val child = childRepository.getFirst()
+            if (child?.faceEmbeddings.isNullOrEmpty()) {
+                _state.update {
+                    it.copy(
+                        isPhotoSyncRunning = false,
+                        snackbar = if (manual) "초기 사진 그룹을 먼저 추가해주세요" else it.snackbar
+                    )
+                }
+                photoSyncInProgress = false
+                return
+            }
 
             val prefs = dataStore.data.first()
             val lastAddedAt = prefs[AppPrefsKeys.LAST_PHOTO_SYNC_ADDED_AT_SECONDS] ?: 0L
@@ -414,7 +657,8 @@ class TimelineViewModel @Inject constructor(
             arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DATE_TAKEN,
-                MediaStore.Images.Media.DATE_ADDED
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.DATE_MODIFIED
             ),
             "${MediaStore.Images.Media.DATE_ADDED} >= ?",
             arrayOf(queryStart.toString()),
@@ -423,15 +667,23 @@ class TimelineViewModel @Inject constructor(
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
             val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
             var count = 0
             while (cursor.moveToNext() && (limit < 0 || count < limit)) {
                 val id = cursor.getLong(idCol)
-                val taken = cursor.getLong(takenCol)
                 val added = cursor.getLong(addedCol)
                 val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                val takenAt = if (taken > 0L) taken else added * 1000L
-                if (added > 0L && takenAt > 0L) {
-                    uris.add(PhotoCandidate(uri.toString(), takenAt, added))
+                val resolvedDate = photoDateResolver.resolve(
+                    context.contentResolver,
+                    PhotoDateSource(
+                        uri = uri,
+                        dateTakenMillis = cursor.getLong(takenCol),
+                        dateAddedSeconds = added,
+                        dateModifiedSeconds = cursor.getLong(modifiedCol)
+                    )
+                )
+                if (added > 0L && resolvedDate != null) {
+                    uris.add(PhotoCandidate(uri.toString(), resolvedDate.takenAtMillis, added))
                 }
                 count++
             }
@@ -643,18 +895,27 @@ class TimelineViewModel @Inject constructor(
     private fun queryTakenAt(uri: Uri): Long? {
         return context.contentResolver.query(
             uri,
-            arrayOf(MediaStore.Images.Media.DATE_TAKEN, MediaStore.Images.Media.DATE_ADDED),
+            arrayOf(
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.DATE_MODIFIED
+            ),
             null, null, null
         )?.use { c ->
             if (!c.moveToFirst()) return@use null
             val takenIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
             val addedIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
-            
-            val taken = if (takenIdx >= 0) c.getLong(takenIdx) else 0L
-            if (taken > 0) return@use taken
-            
-            val added = if (addedIdx >= 0) c.getLong(addedIdx) else 0L
-            if (added > 0) added * 1000L else null
+            val modifiedIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
+
+            photoDateResolver.resolve(
+                context.contentResolver,
+                PhotoDateSource(
+                    uri = uri,
+                    dateTakenMillis = if (takenIdx >= 0) c.getLong(takenIdx) else null,
+                    dateAddedSeconds = if (addedIdx >= 0) c.getLong(addedIdx) else null,
+                    dateModifiedSeconds = if (modifiedIdx >= 0) c.getLong(modifiedIdx) else null
+                )
+            )?.takenAtMillis
         }
     }
 
@@ -1205,6 +1466,9 @@ private data class ContextSearchCandidate(
     val event: Event,
     val score: Int
 )
+
+private fun String.toFloatArrayOrNull(): FloatArray? =
+    runCatching { Json.decodeFromString<List<Float>>(this).toFloatArray() }.getOrNull()
 
 private val CONTEXT_SEARCH_STOPWORDS = setOf(
     "\uac83", "\uac70", "\ub54c", "\ub0a0", "\uad00\ub828", "\uae30\ub85d", "\uc77c\uc0c1",

@@ -303,27 +303,30 @@ class InitViewModel @Inject constructor(
             }
             return
         }
+        val birthDate = state.birthDate ?: return
+        val gender = state.gender ?: return
         val sessionId = UUID.randomUUID().toString()
         currentScanSessionId = sessionId
-        _uiState.update {
-            it.copy(
-                step = InitStep.Scanning,
-                error = null,
-                scanElapsedSeconds = 0L,
-                restoredScanResult = false
-            )
-        }
         viewModelScope.launch(Dispatchers.IO) {
+            val child = Child(
+                id = UUID.randomUUID().toString(),
+                name = state.childName.trim(),
+                birthDate = birthDate,
+                gender = gender,
+                referencePhotoUri = state.referencePhotoUri,
+                faceEmbeddings = emptyList()
+            )
             initialScanDao.deleteAllEmbeddings()
             initialScanDao.deleteAllItems()
             initialScanDao.deleteAllClusters()
             initialScanDao.deleteAllSessions()
+            childRepository.save(child)
             initialScanDao.upsertSession(
                 InitialScanSessionEntity(
                     id = sessionId,
-                    childName = state.childName.trim(),
-                    birthDate = state.birthDate.toString(),
-                    gender = state.gender.name,
+                    childName = child.name,
+                    birthDate = birthDate.toString(),
+                    gender = gender.name,
                     referencePhotoUri = state.referencePhotoUri,
                     status = "RUNNING",
                     startedAt = System.currentTimeMillis()
@@ -335,6 +338,11 @@ class InitViewModel @Inject constructor(
                     putExtra(ScanForegroundService.EXTRA_SESSION_ID, sessionId)
                 }
             )
+            dataStore.edit { prefs ->
+                prefs[AppPrefsKeys.INITIALIZED] = true
+                prefs[AppPrefsKeys.INITIAL_PHOTO_SYNC_CUTOFF_AT] = System.currentTimeMillis()
+            }
+            _uiState.update { it.copy(step = InitStep.Done, error = null) }
         }
     }
 

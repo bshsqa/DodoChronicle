@@ -13,6 +13,8 @@ import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.domain.repository.EventRepository
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase
 import com.bshsqa.dodochronicle.domain.usecase.SyncNewPhotosUseCase.PhotoCandidate
+import com.bshsqa.dodochronicle.media.PhotoDateResolver
+import com.bshsqa.dodochronicle.media.PhotoDateSource
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -25,7 +27,8 @@ class PhotoSyncWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val syncUseCase: SyncNewPhotosUseCase,
     private val eventRepository: EventRepository,
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    private val photoDateResolver: PhotoDateResolver
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -62,22 +65,31 @@ class PhotoSyncWorker @AssistedInject constructor(
             arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DATE_TAKEN,
-                MediaStore.Images.Media.DATE_ADDED
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.DATE_MODIFIED
             ),
             selection, selectionArgs, sortOrder
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
             val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
             var count = 0
             while (cursor.moveToNext() && (limit < 0 || count < limit)) {
                 val id = cursor.getLong(idCol)
-                val taken = cursor.getLong(takenCol)
                 val added = cursor.getLong(addedCol)
                 val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                val takenAt = if (taken > 0L) taken else added * 1000L
-                if (added > 0L && takenAt > 0L) {
-                    uris.add(PhotoCandidate(uri.toString(), takenAt, added))
+                val resolvedDate = photoDateResolver.resolve(
+                    applicationContext.contentResolver,
+                    PhotoDateSource(
+                        uri = uri,
+                        dateTakenMillis = cursor.getLong(takenCol),
+                        dateAddedSeconds = added,
+                        dateModifiedSeconds = cursor.getLong(modifiedCol)
+                    )
+                )
+                if (added > 0L && resolvedDate != null) {
+                    uris.add(PhotoCandidate(uri.toString(), resolvedDate.takenAtMillis, added))
                 }
                 count++
             }

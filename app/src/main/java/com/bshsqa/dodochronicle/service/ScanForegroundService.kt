@@ -20,6 +20,8 @@ import com.bshsqa.dodochronicle.R
 import com.bshsqa.dodochronicle.data.local.db.dao.InitialScanDao
 import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanClusterEntity
 import com.bshsqa.dodochronicle.data.local.db.entity.InitialScanItemEntity
+import com.bshsqa.dodochronicle.media.PhotoDateResolver
+import com.bshsqa.dodochronicle.media.PhotoDateSource
 import com.bshsqa.dodochronicle.ml.FaceCluster
 import com.bshsqa.dodochronicle.ml.FaceDetectorHelper
 import com.bshsqa.dodochronicle.ml.FaceEmbedder
@@ -39,6 +41,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 
@@ -49,6 +53,7 @@ class ScanForegroundService : Service() {
     @Inject lateinit var faceEmbedder: FaceEmbedder
     @Inject lateinit var stateHolder: ScanStateHolder
     @Inject lateinit var initialScanDao: InitialScanDao
+    @Inject lateinit var photoDateResolver: PhotoDateResolver
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
@@ -75,6 +80,7 @@ class ScanForegroundService : Service() {
         private const val STATUS_NO_FACE = "NO_FACE"
         private const val STATUS_FAILED = "FAILED"
         private const val STATUS_RUNNING = "RUNNING"
+        private const val STATUS_PREPARING_ITEMS = "PREPARING_ITEMS"
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -221,7 +227,20 @@ class ScanForegroundService : Service() {
             initialScanDao.deleteClusters(sessionId)
         }
 
-        val photos = queryPhotos()
+        val cutoffDate = runCatching { LocalDate.parse(session?.birthDate.orEmpty()) }
+            .getOrNull()
+            ?.minusYears(1)
+        val cutoffMillis = cutoffDate
+            ?.atStartOfDay(ZoneId.systemDefault())
+            ?.toInstant()
+            ?.toEpochMilli()
+            ?: 0L
+
+        initialScanDao.updateProgress(sessionId, STATUS_PREPARING_ITEMS, 0, 0, 0L)
+        stateHolder.emit(ScanState.Running(0, 0, session?.elapsedSeconds ?: 0L, sessionId))
+        updateProgressNotification(0, 0)
+
+        val photos = queryPhotos(cutoffMillis)
         photos.chunked(1000).forEach { chunk ->
             initialScanDao.insertItems(
                 chunk.map { (uri, takenAt) ->
@@ -347,13 +366,15 @@ class ScanForegroundService : Service() {
         return ScanState.Done(clusters, embeddings, elapsedSeconds, sessionId)
     }
 
-    private fun queryPhotos(): List<Pair<String, Long>> {
+    private fun queryPhotos(cutoffMillis: Long): List<Pair<String, Long>> {
         val uris = mutableListOf<Pair<String, Long>>()
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_TAKEN
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.DATE_MODIFIED
         )
-        val sortOrder = "${MediaStore.Images.Media.DATE_TAKEN} DESC"
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
         val limit = BuildConfig.PHOTO_SCAN_LIMIT
 
         contentResolver.query(
@@ -365,19 +386,31 @@ class ScanForegroundService : Service() {
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
             var count = 0
-            while (cursor.moveToNext() && (limit < 0 || count < limit)) {
+            while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
-                val takenAt = cursor.getLong(dateCol)
                 val uri = Uri.withAppendedPath(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     id.toString()
                 )
-                uris.add(uri.toString() to takenAt)
+                val resolvedDate = photoDateResolver.resolve(
+                    contentResolver,
+                    PhotoDateSource(
+                        uri = uri,
+                        dateTakenMillis = cursor.getLong(dateCol),
+                        dateAddedSeconds = cursor.getLong(addedCol),
+                        dateModifiedSeconds = cursor.getLong(modifiedCol)
+                    )
+                ) ?: continue
+                if (resolvedDate.takenAtMillis < cutoffMillis) continue
+                uris.add(uri.toString() to resolvedDate.takenAtMillis)
                 count++
+                if (limit >= 0 && count >= limit) break
             }
         }
-        return uris
+        return uris.sortedByDescending { it.second }
     }
 
     private suspend fun loadBitmap(uri: String): Bitmap? = withContext(Dispatchers.IO) {

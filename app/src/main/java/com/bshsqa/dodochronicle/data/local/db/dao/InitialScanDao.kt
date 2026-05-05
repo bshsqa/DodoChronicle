@@ -41,8 +41,11 @@ interface InitialScanDao {
     @Query("SELECT * FROM initial_scan_sessions WHERE id = :sessionId LIMIT 1")
     suspend fun getSession(sessionId: String): InitialScanSessionEntity?
 
-    @Query("SELECT * FROM initial_scan_sessions WHERE status IN ('RUNNING', 'PAUSED', 'COMPLETED') ORDER BY startedAt DESC LIMIT 1")
+    @Query("SELECT * FROM initial_scan_sessions WHERE status IN ('PREPARING_ITEMS', 'RUNNING', 'PAUSED', 'COMPLETED', 'PARTIALLY_APPLIED') ORDER BY startedAt DESC LIMIT 1")
     suspend fun getResumableSession(): InitialScanSessionEntity?
+
+    @Query("UPDATE initial_scan_sessions SET status = :status, lastCheckpointAt = :updatedAt WHERE id = :sessionId")
+    suspend fun updateStatus(sessionId: String, status: String, updatedAt: Long = System.currentTimeMillis())
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEmbeddings(items: List<InitialScanPhotoEmbeddingEntity>)
@@ -86,6 +89,9 @@ interface InitialScanDao {
     @Query("DELETE FROM initial_scan_items WHERE sessionId = :sessionId")
     suspend fun deleteItems(sessionId: String)
 
+    @Query("DELETE FROM initial_scan_items WHERE sessionId = :sessionId AND clusterId IN (:clusterIds)")
+    suspend fun deleteItemsByClusters(sessionId: String, clusterIds: List<Int>)
+
     @Query("DELETE FROM initial_scan_items")
     suspend fun deleteAllItems()
 
@@ -97,6 +103,9 @@ interface InitialScanDao {
 
     @Query("DELETE FROM initial_scan_clusters WHERE sessionId = :sessionId")
     suspend fun deleteClusters(sessionId: String)
+
+    @Query("DELETE FROM initial_scan_clusters WHERE sessionId = :sessionId AND clusterId IN (:clusterIds)")
+    suspend fun deleteClustersByIds(sessionId: String, clusterIds: List<Int>)
 
     @Query("DELETE FROM initial_scan_clusters")
     suspend fun deleteAllClusters()

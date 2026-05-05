@@ -85,6 +85,8 @@ fun TimelineScreen(
     var showResetConfirm by remember { mutableStateOf(false) }
     var showRetryRoomDialog by remember { mutableStateOf(false) }
     var showPendingDialog by remember { mutableStateOf(false) }
+    var showInitialScanDialog by remember { mutableStateOf(false) }
+    var showInitialScanCompleteConfirm by remember { mutableStateOf(false) }
     var showHiddenItemsDialog by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showImportEventsDialog by remember { mutableStateOf(false) }
@@ -338,6 +340,17 @@ fun TimelineScreen(
                     PendingPhotosBanner(
                         count = state.pendingPhotos.size,
                         onClick = { showPendingDialog = true }
+                    )
+                }
+
+                state.initialScanBanner?.let { banner ->
+                    InitialScanBanner(
+                        banner = banner,
+                        onClick = {
+                            if (banner.isCompleted && state.initialScanClusters.isNotEmpty()) {
+                                showInitialScanDialog = true
+                            }
+                        }
                     )
                 }
 
@@ -689,6 +702,39 @@ fun TimelineScreen(
         )
     }
 
+    if (showInitialScanDialog && state.initialScanClusters.isNotEmpty()) {
+        InitialScanClusterDialog(
+            clusters = state.initialScanClusters,
+            selectedClusterIds = state.selectedInitialScanClusterIds,
+            onToggle = viewModel::toggleInitialScanCluster,
+            onAdd = viewModel::addSelectedInitialScanClusters,
+            onClose = { showInitialScanDialog = false },
+            onComplete = { showInitialScanCompleteConfirm = true }
+        )
+    }
+
+    if (showInitialScanCompleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showInitialScanCompleteConfirm = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("사진 그룹 선택 완료") },
+            text = { Text("아직 추가하지 않은 그룹은 다시 선택할 수 없습니다.\n정말 완료할까요?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showInitialScanCompleteConfirm = false
+                        showInitialScanDialog = false
+                        viewModel.completeInitialScanSelection()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("완료") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInitialScanCompleteConfirm = false }) { Text("취소") }
+            }
+        )
+    }
+
     if (showImportEventsDialog) {
         ImportEventsDialog(
             onDismiss = { showImportEventsDialog = false },
@@ -976,6 +1022,193 @@ private fun PendingPhotosBanner(count: Int, onClick: () -> Unit) {
             Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+private fun formatElapsedTime(totalSeconds: Long): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return if (minutes > 0) "${minutes}분 ${seconds}초" else "${seconds}초"
+}
+
+@Composable
+private fun InitialScanBanner(banner: InitialScanBannerInfo, onClick: () -> Unit) {
+    val progressText = if (banner.totalCount > 0) {
+        "${banner.processedCount} / ${banner.totalCount}"
+    } else {
+        "사진 목록 준비 중"
+    }
+    val title = if (banner.isCompleted) {
+        "분류된 사진 그룹 ${banner.clusterCount}개를 확인해주세요"
+    } else {
+        "초기 사진 분류 중 $progressText"
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = banner.isCompleted, onClick = onClick),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        tonalElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (banner.isCompleted) Icons.Default.PhotoLibrary else Icons.Default.Sync,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    "소요 ${formatElapsedTime(banner.elapsedSeconds)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                )
+            }
+            if (banner.isCompleted) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForwardIos,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InitialScanClusterDialog(
+    clusters: List<InitialScanClusterUiModel>,
+    selectedClusterIds: Set<Int>,
+    onToggle: (Int) -> Unit,
+    onAdd: () -> Unit,
+    onClose: () -> Unit,
+    onComplete: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("분류된 사진 그룹") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "아이 사진 그룹을 골라 추가하세요. 한번에 다 고르지 않아도 됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.heightIn(max = 460.dp),
+                    contentPadding = PaddingValues(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    gridItems(clusters) { cluster ->
+                        InitialScanClusterCard(
+                            cluster = cluster,
+                            isSelected = cluster.id in selectedClusterIds,
+                            onClick = { onToggle(cluster.id) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = onAdd,
+                    enabled = selectedClusterIds.isNotEmpty()
+                ) { Text("추가") }
+                TextButton(onClick = onComplete) { Text("완료") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose) { Text("닫기") }
+        }
+    )
+}
+
+@Composable
+private fun InitialScanClusterCard(
+    cluster: InitialScanClusterUiModel,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val border = if (isSelected) {
+        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    }
+
+    Card(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clickable { onClick() },
+        border = border,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = false
+            ) {
+                gridItems(cluster.previewUris.take(9)) { uri ->
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = null,
+                        modifier = Modifier.aspectRatio(1f),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+            if (isSelected) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "${cluster.count}장",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
         }
     }
 }
