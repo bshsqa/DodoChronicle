@@ -1,5 +1,6 @@
 package com.bshsqa.dodochronicle.presentation.init
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -68,9 +70,20 @@ fun InitScreen(viewModel: InitViewModel, onInitComplete: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
+    val context = LocalContext.current
     val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri -> uri?.let { vm.setReferencePhoto(it.toString()) } }
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            vm.setReferencePhoto(it.toString())
+        }
+    }
 
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -104,7 +117,7 @@ private fun ChildInfoStep(state: InitUiState, vm: InitViewModel) {
                 .size(120.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { photoPicker.launch("image/*") },
+                .clickable { photoPicker.launch(arrayOf("image/*")) },
             contentAlignment = Alignment.Center
         ) {
             if (state.referencePhotoUri.isNotBlank()) {

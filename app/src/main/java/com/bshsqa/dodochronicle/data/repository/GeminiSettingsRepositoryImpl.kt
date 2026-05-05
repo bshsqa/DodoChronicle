@@ -1,5 +1,6 @@
 package com.bshsqa.dodochronicle.data.repository
 
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.IOException
 import javax.inject.Inject
 
 class GeminiSettingsRepositoryImpl @Inject constructor(
@@ -22,6 +24,10 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
 ) : GeminiSettingsRepository {
     private val gson = Gson()
 
+    companion object {
+        private const val TAG = "DodoGeminiSettings"
+    }
+
     override val settingsFlow: Flow<GeminiSettings> = dataStore.data.map { prefs ->
         prefs.toSettings()
     }
@@ -29,9 +35,14 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
     override suspend fun getSettings(): GeminiSettings = dataStore.data.first().toSettings()
 
     override suspend fun save(apiKey: String, modelId: String) {
+        val cleanKey = apiKey.trim()
         val normalizedModelId = normalizeModelId(modelId)
+        require(cleanKey.isNotBlank()) { "Gemini API 키를 먼저 입력해주세요." }
+        require(normalizedModelId.isNotBlank()) { "Gemini 모델을 선택해주세요." }
+
+        Log.i(TAG, "Model save requested. hasInputKey=true model=$normalizedModelId")
         dataStore.edit { prefs ->
-            prefs[AppPrefsKeys.GEMINI_API_KEY] = apiKey.trim()
+            prefs[AppPrefsKeys.GEMINI_API_KEY] = cleanKey
             prefs[AppPrefsKeys.GEMINI_MODEL_ID] = normalizedModelId
         }
     }
@@ -53,6 +64,7 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
     override suspend fun fetchModels(apiKey: String): List<GeminiModelOption> {
         val cleanKey = apiKey.trim()
         require(cleanKey.isNotBlank()) { "Gemini API 키를 먼저 입력해주세요." }
+        Log.i(TAG, "Model fetch started. hasInputKey=true")
 
         val request = Request.Builder()
             .url("https://generativelanguage.googleapis.com/v1beta/models")
@@ -60,21 +72,31 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
             .get()
             .build()
 
-        val raw = httpClient.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                if (response.code == 400 || response.code == 401 || response.code == 403) {
-                    error("Gemini API 키를 확인해주세요.")
+        val raw = try {
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                Log.i(TAG, "Model fetch response. code=${response.code} bodyLength=${body.length}")
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Model fetch failed. code=${response.code} bodyPrefix=${body.take(160)}")
+                    if (response.code == 400 || response.code == 401 || response.code == 403) {
+                        error("Gemini API 키를 확인해주세요.")
+                    }
+                    error("모델 목록을 불러오지 못했습니다. 네트워크를 확인해주세요.")
                 }
-                error("모델 목록을 불러오지 못했습니다. 네트워크를 확인해주세요.")
+                body
             }
-            body
+        } catch (e: IOException) {
+            Log.e(TAG, "Model fetch network failed.", e)
+            error("네트워크 연결을 확인해주세요.")
         }
 
-        val response = runCatching { gson.fromJson(raw, GeminiModelsResponse::class.java) }.getOrNull()
+        val response = runCatching { gson.fromJson(raw, GeminiModelsResponse::class.java) }
+            .onFailure { Log.e(TAG, "Model fetch parse failed. bodyPrefix=${raw.take(160)}", it) }
+            .getOrNull()
             ?: error("모델 목록 응답을 읽지 못했습니다.")
 
-        val options = response.models.orEmpty()
+        val allModels = response.models.orEmpty()
+        val options = allModels
             .filter { it.supportedGenerationMethods.orEmpty().contains("generateContent") }
             .map { model ->
                 val id = normalizeModelId(model.name.orEmpty())
@@ -84,8 +106,10 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
                     description = model.description.orEmpty()
                 )
             }
+            .filter { it.id.isNotBlank() }
             .distinctBy { it.id }
 
+        Log.i(TAG, "Model fetch parsed. total=${allModels.size} usable=${options.size}")
         require(options.isNotEmpty()) { "사용 가능한 Gemini 생성 모델이 없습니다." }
 
         dataStore.edit { prefs ->
@@ -101,7 +125,6 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
         if (savedKey.isNotBlank() && savedModel.isNotBlank()) {
             return GeminiSettings(savedKey, normalizeModelId(savedModel))
         }
-
         return GeminiSettings()
     }
 

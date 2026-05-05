@@ -1,5 +1,6 @@
 package com.bshsqa.dodochronicle.presentation.timeline
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -149,9 +150,17 @@ fun TimelineScreen(
         }
     }
     val childProfilePhotoLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
-        uri?.let { viewModel.updateChildReferencePhoto(it.toString()) }
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.updateChildReferencePhoto(it.toString())
+        }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -557,7 +566,7 @@ fun TimelineScreen(
         SettingsMenuDialog(
             childName = state.childName,
             childReferencePhotoUri = state.childReferencePhotoUri,
-            onChangeChildPhoto = { childProfilePhotoLauncher.launch("image/*") },
+            onChangeChildPhoto = { childProfilePhotoLauncher.launch(arrayOf("image/*")) },
             pendingRetryCount = state.pendingRetryRooms.sumOf { it.chunkCount },
             pendingPhotoCount = state.pendingPhotos.size,
             onKakaoImport = {
@@ -2160,6 +2169,8 @@ private fun SettingsMenuDialog(
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var profilePhotoLoadFailed by remember(childReferencePhotoUri) { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -2186,12 +2197,13 @@ private fun SettingsMenuDialog(
                             .clickable { onChangeChildPhoto() },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (childReferencePhotoUri.isNotBlank()) {
+                        if (childReferencePhotoUri.isNotBlank() && !profilePhotoLoadFailed) {
                             AsyncImage(
                                 model = childReferencePhotoUri,
                                 contentDescription = "대표 사진 변경",
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                                contentScale = ContentScale.Crop,
+                                onError = { profilePhotoLoadFailed = true }
                             )
                         } else {
                             Icon(
