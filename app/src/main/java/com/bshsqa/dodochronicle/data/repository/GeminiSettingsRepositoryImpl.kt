@@ -10,9 +10,12 @@ import com.bshsqa.dodochronicle.domain.repository.GeminiSettingsRepository
 import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -66,36 +69,14 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
         require(cleanKey.isNotBlank()) { "Gemini API 키를 먼저 입력해주세요." }
         Log.i(TAG, "Model fetch started. hasInputKey=true")
 
-        val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models")
-            .header("x-goog-api-key", cleanKey)
-            .get()
-            .build()
+        val allModels = mutableListOf<GeminiModelInfo>()
+        var pageToken: String? = null
+        do {
+            val response = fetchModelPage(cleanKey, pageToken)
+            allModels += response.models.orEmpty()
+            pageToken = response.nextPageToken?.takeIf { it.isNotBlank() }
+        } while (pageToken != null)
 
-        val raw = try {
-            httpClient.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                Log.i(TAG, "Model fetch response. code=${response.code} bodyLength=${body.length}")
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Model fetch failed. code=${response.code} bodyPrefix=${body.take(160)}")
-                    if (response.code == 400 || response.code == 401 || response.code == 403) {
-                        error("Gemini API 키를 확인해주세요.")
-                    }
-                    error("모델 목록을 불러오지 못했습니다. 네트워크를 확인해주세요.")
-                }
-                body
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Model fetch network failed.", e)
-            error("네트워크 연결을 확인해주세요.")
-        }
-
-        val response = runCatching { gson.fromJson(raw, GeminiModelsResponse::class.java) }
-            .onFailure { Log.e(TAG, "Model fetch parse failed. bodyPrefix=${raw.take(160)}", it) }
-            .getOrNull()
-            ?: error("모델 목록 응답을 읽지 못했습니다.")
-
-        val allModels = response.models.orEmpty()
         val options = allModels
             .filter { it.supportedGenerationMethods.orEmpty().contains("generateContent") }
             .map { model ->
@@ -119,6 +100,43 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
         return options
     }
 
+    private suspend fun fetchModelPage(apiKey: String, pageToken: String?): GeminiModelsResponse =
+        withContext(Dispatchers.IO) {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("key", apiKey)
+            .addQueryParameter("pageSize", "1000")
+            .apply {
+                if (!pageToken.isNullOrBlank()) addQueryParameter("pageToken", pageToken)
+            }
+            .build()
+
+        val raw = try {
+            val request = Request.Builder().url(url).get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                Log.i(TAG, "Model fetch response. code=${response.code} bodyLength=${body.length}")
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Model fetch failed. code=${response.code} bodyPrefix=${body.take(160)}")
+                    if (response.code == 400 || response.code == 401 || response.code == 403) {
+                        error("Gemini API 키를 확인해주세요.")
+                    }
+                    error("모델 목록을 불러오지 못했습니다. 네트워크를 확인해주세요.")
+                }
+                body
+            }
+        } catch (e: IOException) {
+            Log.e(TAG, "Model fetch network failed.", e)
+            error("네트워크 연결을 확인해주세요.")
+        }
+
+        runCatching { gson.fromJson(raw, GeminiModelsResponse::class.java) }
+            .onFailure { Log.e(TAG, "Model fetch parse failed. bodyPrefix=${raw.take(160)}", it) }
+            .getOrNull()
+            ?: error("모델 목록 응답을 읽지 못했습니다.")
+    }
+
     private fun Preferences.toSettings(): GeminiSettings {
         val savedKey = this[AppPrefsKeys.GEMINI_API_KEY].orEmpty()
         val savedModel = this[AppPrefsKeys.GEMINI_MODEL_ID].orEmpty()
@@ -139,7 +157,8 @@ class GeminiSettingsRepositoryImpl @Inject constructor(
     }
 
     private data class GeminiModelsResponse(
-        @SerializedName("models") val models: List<GeminiModelInfo>?
+        @SerializedName("models") val models: List<GeminiModelInfo>?,
+        @SerializedName("nextPageToken") val nextPageToken: String?
     )
 
     private data class GeminiModelInfo(
