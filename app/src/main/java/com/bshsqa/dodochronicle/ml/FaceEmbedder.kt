@@ -42,10 +42,14 @@ class FaceEmbedder @Inject constructor(
     fun embed(bitmap: Bitmap, face: Face): FloatArray? {
         val interp = interpreter ?: return null
         val crop = cropFace(bitmap, face) ?: return null
-        val input = preprocessBitmap(crop)
-        val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
-        interp.run(input, output)
-        return normalize(output[0])
+        return try {
+            val input = preprocessBitmap(crop)
+            val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
+            interp.run(input, output)
+            normalize(output[0])
+        } finally {
+            crop.recycle()
+        }
     }
 
     private fun cropFace(bitmap: Bitmap, face: Face): Bitmap? {

@@ -7,10 +7,12 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.MediaStore
+import android.util.Log
 import com.bshsqa.dodochronicle.BuildConfig
 import com.bshsqa.dodochronicle.DodoApp
 import com.bshsqa.dodochronicle.MainActivity
@@ -33,6 +35,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -58,8 +61,10 @@ class ScanForegroundService : Service() {
 
         private const val NOTIFICATION_ID = 1001
         private const val RESULT_NOTIFICATION_ID = 1003
+        private const val TAG = "DodoInitialScan"
         private const val WAKELOCK_TAG = "DodoChronicle::ScanWakeLock"
         private const val WAKELOCK_TIMEOUT_MS = 12 * 60 * 60 * 1000L
+        private const val MAX_DECODE_DIMENSION = 1600
         private const val CHECKPOINT_SIZE = 500
         private const val CLUSTER_THRESHOLD = 0.68f
         private const val MAX_REPRESENTATIVE_URIS = 9
@@ -79,7 +84,7 @@ class ScanForegroundService : Service() {
             ACTION_START -> startScan(intent.getStringExtra(EXTRA_SESSION_ID).orEmpty())
             ACTION_CANCEL -> cancelScan()
         }
-        return START_NOT_STICKY
+        return START_REDELIVER_INTENT
     }
 
     private fun startScan(sessionId: String) {
@@ -103,6 +108,11 @@ class ScanForegroundService : Service() {
         scanJob = serviceScope.launch {
             try {
                 performScan(sessionId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "Initial scan stopped by unexpected error. sessionId=$sessionId", t)
+                stateHolder.emit(ScanState.Failed("사진 분석 중 오류가 발생했습니다. 앱을 다시 열면 이어서 진행할 수 있습니다."))
             } finally {
                 stopSelf()
             }
@@ -144,6 +154,7 @@ class ScanForegroundService : Service() {
 
         emitProgress(sessionId, total, processed, session.elapsedSeconds, checkpoint = false)
         updateProgressNotification(processed, total)
+        Log.i(TAG, "Initial scan started. sessionId=$sessionId processed=$processed total=$total")
 
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -173,6 +184,7 @@ class ScanForegroundService : Service() {
                 items = processedItems,
                 clusters = clusters.map { it.toEntity(sessionId) }
             )
+            Log.i(TAG, "Initial scan checkpoint. sessionId=$sessionId processed=$processed total=$total clusters=${clusters.size}")
             stateHolder.emit(ScanState.Running(processed, total, elapsedSeconds, sessionId))
             updateProgressNotification(processed, total)
         }
@@ -195,6 +207,7 @@ class ScanForegroundService : Service() {
             elapsedSeconds = elapsedSeconds
         )
         val done = buildDoneState(sessionId, elapsedSeconds)
+        Log.i(TAG, "Initial scan completed. sessionId=$sessionId processed=$processed total=$total clusters=${clusters.size}")
         stateHolder.emit(done)
         showCompletedNotification(elapsedSeconds)
     }
@@ -230,27 +243,37 @@ class ScanForegroundService : Service() {
         item: InitialScanItemEntity,
         clusters: MutableList<MutableScanCluster>
     ): InitialScanItemEntity {
-        val bitmap = loadBitmap(item.uri)
-            ?: return item.failed("bitmap load failed")
-        val faces = faceDetector.detectFaces(bitmap)
-        if (faces.isEmpty()) return item.copy(
-            status = STATUS_NO_FACE,
-            embeddingJson = "[]",
-            clusterId = null,
-            errorMessage = "",
-            updatedAt = System.currentTimeMillis()
-        )
+        var bitmap: Bitmap? = null
+        return try {
+            bitmap = loadBitmap(item.uri)
+                ?: return item.failed("bitmap load failed")
+            val faces = faceDetector.detectFaces(bitmap)
+            if (faces.isEmpty()) return item.copy(
+                status = STATUS_NO_FACE,
+                embeddingJson = "[]",
+                clusterId = null,
+                errorMessage = "",
+                updatedAt = System.currentTimeMillis()
+            )
 
-        val embedding = faceEmbedder.embed(bitmap, faces.first())
-            ?: return item.failed("embedding failed")
-        val clusterId = assignToCluster(item.uri, embedding, clusters)
-        return item.copy(
-            status = STATUS_PROCESSED,
-            embeddingJson = Json.encodeToString(embedding.toList()),
-            clusterId = clusterId,
-            errorMessage = "",
-            updatedAt = System.currentTimeMillis()
-        )
+            val embedding = faceEmbedder.embed(bitmap, faces.first())
+                ?: return item.failed("embedding failed")
+            val clusterId = assignToCluster(item.uri, embedding, clusters)
+            item.copy(
+                status = STATUS_PROCESSED,
+                embeddingJson = Json.encodeToString(embedding.toList()),
+                clusterId = clusterId,
+                errorMessage = "",
+                updatedAt = System.currentTimeMillis()
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            Log.w(TAG, "Initial scan item failed. uri=${item.uri}", t)
+            item.failed(t.message ?: t::class.java.simpleName)
+        } finally {
+            bitmap?.recycle()
+        }
     }
 
     private fun InitialScanItemEntity.failed(message: String): InitialScanItemEntity =
@@ -359,12 +382,34 @@ class ScanForegroundService : Service() {
 
     private suspend fun loadBitmap(uri: String): Bitmap? = withContext(Dispatchers.IO) {
         try {
-            contentResolver.openInputStream(Uri.parse(uri))?.use {
-                android.graphics.BitmapFactory.decodeStream(it)
+            val parsedUri = Uri.parse(uri)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(parsedUri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
             }
-        } catch (_: Exception) {
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight)
+            }
+            contentResolver.openInputStream(parsedUri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Bitmap load failed. uri=$uri", t)
             null
         }
+    }
+
+    private fun calculateInSampleSize(width: Int, height: Int): Int {
+        if (width <= 0 || height <= 0) return 1
+        var sampleSize = 1
+        var sampledWidth = width
+        var sampledHeight = height
+        while (sampledWidth / 2 >= MAX_DECODE_DIMENSION || sampledHeight / 2 >= MAX_DECODE_DIMENSION) {
+            sampleSize *= 2
+            sampledWidth /= 2
+            sampledHeight /= 2
+        }
+        return sampleSize
     }
 
     private fun mainActivityPendingIntent(): PendingIntent = PendingIntent.getActivity(
