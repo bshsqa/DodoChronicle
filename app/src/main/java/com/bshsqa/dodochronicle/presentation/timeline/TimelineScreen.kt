@@ -1549,7 +1549,25 @@ private fun GroupedTimelineContent(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     var showJumpButtons by remember { mutableStateOf(false) }
-    val currentIndex by remember {
+    val scrollPosition by remember(grouped) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val firstVisibleItem = layoutInfo.visibleItemsInfo.firstOrNull()
+            when {
+                grouped.isEmpty() || layoutInfo.totalItemsCount <= 1 -> 0f
+                !listState.canScrollBackward -> 0f
+                !listState.canScrollForward -> 1f
+                firstVisibleItem == null || firstVisibleItem.size == 0 -> 0f
+                else -> {
+                    val itemOffset = (-firstVisibleItem.offset).coerceAtLeast(0)
+                    val itemProgress = itemOffset.toFloat() / firstVisibleItem.size.toFloat()
+                    ((firstVisibleItem.index + itemProgress) / (layoutInfo.totalItemsCount - 1).toFloat())
+                        .coerceIn(0f, 1f)
+                }
+            }
+        }
+    }
+    val currentIndex by remember(grouped) {
         derivedStateOf {
             when {
                 grouped.isEmpty() -> 0
@@ -1603,6 +1621,7 @@ private fun GroupedTimelineContent(
             TimelineFastScroller(
                 groupCount = grouped.size,
                 currentIndex = currentIndex,
+                currentPosition = scrollPosition,
                 labelForIndex = { index ->
                     grouped[index.coerceIn(grouped.indices)].key.format(DateTimeFormatter.ofPattern("yyyy. M. d"))
                 },
@@ -1614,7 +1633,7 @@ private fun GroupedTimelineContent(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .fillMaxHeight()
-                    .padding(top = 8.dp, bottom = 96.dp)
+                    .padding(top = 8.dp, bottom = 8.dp)
             )
 
             AnimatedVisibility(
@@ -1674,6 +1693,7 @@ private fun TimelineJumpButtons(
 private fun TimelineFastScroller(
     groupCount: Int,
     currentIndex: Int,
+    currentPosition: Float,
     labelForIndex: (Int) -> String,
     onJumpToIndex: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -1691,16 +1711,21 @@ private fun TimelineFastScroller(
             val density = LocalDensity.current
             val trackHeightPx = with(density) { maxHeight.toPx() }
             val handleHeight = 58.dp
+            val handleHeightPx = with(density) { handleHeight.toPx() }
             fun indexForY(y: Float): Int {
-                val ratio = (y / trackHeightPx).coerceIn(0f, 1f)
+                val draggableHeightPx = (trackHeightPx - handleHeightPx).coerceAtLeast(1f)
+                val ratio = ((y - handleHeightPx / 2f) / draggableHeightPx).coerceIn(0f, 1f)
                 return (ratio * (groupCount - 1)).toInt().coerceIn(0, groupCount - 1)
             }
 
             val thumbIndex = draggingIndex ?: currentIndex
+            val thumbPosition = draggingIndex?.let {
+                if (groupCount <= 1) 0f else it.toFloat() / (groupCount - 1).toFloat()
+            } ?: currentPosition.coerceIn(0f, 1f)
             val thumbY = if (groupCount <= 1) {
                 0.dp
             } else {
-                (maxHeight - handleHeight) * (thumbIndex.toFloat() / (groupCount - 1).toFloat())
+                (maxHeight - handleHeight) * thumbPosition
             }
             val activeIndex = thumbIndex
 
