@@ -38,28 +38,28 @@ abstract class DodoDatabase : RoomDatabase() {
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE children ADD COLUMN gender TEXT NOT NULL DEFAULT 'MALE'"
                 )
             }
         }
         val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE photo_records ADD COLUMN isExcludedFromModel INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }
         val MIGRATION_3_4 = object : Migration(3, 4) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE events ADD COLUMN longContent TEXT")
-                database.execSQL("ALTER TABLE events ADD COLUMN rawExcerpt TEXT")
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE events ADD COLUMN longContent TEXT")
+                db.execSQL("ALTER TABLE events ADD COLUMN rawExcerpt TEXT")
             }
         }
         val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS retry_chunks (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -75,31 +75,31 @@ abstract class DodoDatabase : RoomDatabase() {
             }
         }
         val MIGRATION_5_6 = object : Migration(5, 6) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE events ADD COLUMN isHidden INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }
         val MIGRATION_6_7 = object : Migration(6, 7) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE events ADD COLUMN textEmbeddingJson TEXT NOT NULL DEFAULT '[]'"
                 )
             }
         }
         val MIGRATION_7_8 = object : Migration(7, 8) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE events ADD COLUMN searchSummary TEXT NOT NULL DEFAULT ''")
-                database.execSQL("ALTER TABLE events ADD COLUMN searchTagsJson TEXT NOT NULL DEFAULT '[]'")
-                database.execSQL("ALTER TABLE events ADD COLUMN searchAliasesJson TEXT NOT NULL DEFAULT '[]'")
-                database.execSQL("ALTER TABLE events ADD COLUMN relatedKeywordsJson TEXT NOT NULL DEFAULT '[]'")
-                database.execSQL("ALTER TABLE events ADD COLUMN searchContextVersion INTEGER NOT NULL DEFAULT 0")
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE events ADD COLUMN searchSummary TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE events ADD COLUMN searchTagsJson TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE events ADD COLUMN searchAliasesJson TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE events ADD COLUMN relatedKeywordsJson TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE events ADD COLUMN searchContextVersion INTEGER NOT NULL DEFAULT 0")
             }
         }
         val MIGRATION_8_9 = object : Migration(8, 9) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS pending_photos (
                         uri TEXT NOT NULL PRIMARY KEY,
@@ -113,20 +113,20 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_childId ON pending_photos(childId)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_createdAt ON pending_photos(createdAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_childId ON pending_photos(childId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_photos_createdAt ON pending_photos(createdAt)")
             }
         }
         val MIGRATION_9_10 = object : Migration(9, 10) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE photo_records ADD COLUMN isMissing INTEGER NOT NULL DEFAULT 0")
-                database.execSQL("ALTER TABLE photo_records ADD COLUMN lastSeenAt INTEGER NOT NULL DEFAULT 0")
-                database.execSQL("ALTER TABLE photo_records ADD COLUMN missingCheckedAt INTEGER NOT NULL DEFAULT 0")
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photo_records ADD COLUMN isMissing INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE photo_records ADD COLUMN lastSeenAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE photo_records ADD COLUMN missingCheckedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
         val MIGRATION_10_11 = object : Migration(10, 11) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS rejected_photos (
                         uri TEXT NOT NULL PRIMARY KEY,
@@ -137,13 +137,13 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_childId ON rejected_photos(childId)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_addedAtSeconds ON rejected_photos(addedAtSeconds)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_childId ON rejected_photos(childId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_rejected_photos_addedAtSeconds ON rejected_photos(addedAtSeconds)")
             }
         }
         val MIGRATION_11_12 = object : Migration(11, 12) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS initial_scan_sessions (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -160,7 +160,7 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL(
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS initial_scan_photo_embeddings (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -172,17 +172,17 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_sessionId ON initial_scan_photo_embeddings(sessionId)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_clusterId ON initial_scan_photo_embeddings(clusterId)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_uri ON initial_scan_photo_embeddings(uri)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_sessionId ON initial_scan_photo_embeddings(sessionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_clusterId ON initial_scan_photo_embeddings(clusterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_photo_embeddings_uri ON initial_scan_photo_embeddings(uri)")
             }
         }
         val MIGRATION_12_13 = object : Migration(12, 13) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE initial_scan_sessions ADD COLUMN lastCheckpointAt INTEGER NOT NULL DEFAULT 0"
                 )
-                database.execSQL(
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS initial_scan_items (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -197,11 +197,11 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_sessionId ON initial_scan_items(sessionId)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_status ON initial_scan_items(status)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_clusterId ON initial_scan_items(clusterId)")
-                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_initial_scan_items_sessionId_uri ON initial_scan_items(sessionId, uri)")
-                database.execSQL(
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_sessionId ON initial_scan_items(sessionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_status ON initial_scan_items(status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_items_clusterId ON initial_scan_items(clusterId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_initial_scan_items_sessionId_uri ON initial_scan_items(sessionId, uri)")
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS initial_scan_clusters (
                         sessionId TEXT NOT NULL,
@@ -214,7 +214,7 @@ abstract class DodoDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_clusters_sessionId ON initial_scan_clusters(sessionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_initial_scan_clusters_sessionId ON initial_scan_clusters(sessionId)")
             }
         }
     }

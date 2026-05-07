@@ -43,7 +43,7 @@ data class InitUiState(
 
 @HiltViewModel
 class InitViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
     private val faceEmbedder: FaceEmbedder,
     private val initialScanDao: InitialScanDao,

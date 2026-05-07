@@ -24,9 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
@@ -57,19 +55,8 @@ import com.bshsqa.dodochronicle.domain.model.PendingPhoto
 import com.bshsqa.dodochronicle.domain.model.PhotoRecord
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-private enum class ZoomLevel { YEAR, MONTH, WEEK, DAY }
-
-private fun scaleToZoom(scale: Float) = when {
-    scale < 0.5f -> ZoomLevel.YEAR
-    scale < 2f -> ZoomLevel.MONTH
-    scale < 6f -> ZoomLevel.WEEK
-    else -> ZoomLevel.DAY
-}
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -796,173 +783,11 @@ private fun CategoryFilterRow(selected: EventCategory?, onSelect: (EventCategory
 }
 
 
-@Composable
-private fun TimelineBar(
-    modifier: Modifier,
-    startDate: LocalDate,
-    today: LocalDate,
-    totalDays: Float,
-    offsetY: Float,
-    baseHeightPx: Float,
-    zoomLevel: ZoomLevel,
-    events: List<Event>
-) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-    val eventDotColor = MaterialTheme.colorScheme.secondary
-
-    Canvas(modifier = modifier.background(surfaceVariant.copy(alpha = 0.3f))) {
-        val barX = size.width / 2f
-        val topY = offsetY
-
-        drawLine(
-            color = primaryColor.copy(alpha = 0.4f),
-            start = Offset(barX, 0f),
-            end = Offset(barX, size.height),
-            strokeWidth = 3f,
-            cap = StrokeCap.Round
-        )
-
-        val labelDates = generateLabelDates(startDate, today, zoomLevel)
-        for (date in labelDates) {
-            val days = ChronoUnit.DAYS.between(startDate, date).toFloat()
-            val fraction = days / totalDays
-            val y = topY + fraction * baseHeightPx
-            if (y < 0 || y > size.height) continue
-
-            drawLine(
-                color = primaryColor.copy(alpha = 0.6f),
-                start = Offset(barX - 8f, y),
-                end = Offset(barX + 8f, y),
-                strokeWidth = 2f
-            )
-        }
-
-        for (event in events) {
-            val days = ChronoUnit.DAYS.between(startDate, event.date).toFloat()
-            val fraction = (days / totalDays).coerceIn(0f, 1f)
-            val y = topY + fraction * baseHeightPx
-            if (y < 0 || y > size.height) continue
-            drawCircle(
-                color = eventDotColor,
-                radius = 6f,
-                center = Offset(barX, y)
-            )
-        }
-    }
-}
-
-private fun generateLabelDates(start: LocalDate, end: LocalDate, zoom: ZoomLevel): List<LocalDate> {
-    val dates = mutableListOf<LocalDate>()
-    var current = when (zoom) {
-        ZoomLevel.YEAR -> start.withDayOfYear(1)
-        ZoomLevel.MONTH -> start.withDayOfMonth(1)
-        ZoomLevel.WEEK -> start
-        ZoomLevel.DAY -> start
-    }
-    val step = when (zoom) {
-        ZoomLevel.YEAR -> java.time.Period.ofYears(1)
-        ZoomLevel.MONTH -> java.time.Period.ofMonths(1)
-        ZoomLevel.WEEK -> java.time.Period.ofWeeks(1)
-        ZoomLevel.DAY -> java.time.Period.ofDays(1)
-    }
-    while (!current.isAfter(end)) {
-        dates.add(current)
-        current = current.plus(step)
-    }
-    return dates
-}
-
 private fun Modifier.consumeAllPointers(): Modifier = pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             awaitPointerEvent()
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun EventCard(
-    event: Event,
-    onClick: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onDelete: () -> Unit
-) {
-    var showMenu by remember { mutableStateOf(false) }
-    val categoryColor = categoryColor(event.category)
-    val categoryLabel = categoryLabel(event.category)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { showMenu = true }
-            ),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AssistChip(
-                    onClick = {},
-                    label = { Text(categoryLabel, style = MaterialTheme.typography.labelSmall) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = categoryColor.copy(alpha = 0.12f),
-                        labelColor = categoryColor
-                    ),
-                    border = BorderStroke(1.dp, categoryColor.copy(alpha = 0.3f))
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (event.isFavorite) {
-                        Icon(Icons.Default.Star, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp))
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        event.date.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            if (event.category == EventCategory.PHOTO) {
-                AsyncImage(
-                    model = event.content,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Text(
-                    event.content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-
-    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-        DropdownMenuItem(
-            text = { Text(if (event.isFavorite) "즐겨찾기 해제" else "즐겨찾기") },
-            leadingIcon = { Icon(if (event.isFavorite) Icons.Default.StarBorder else Icons.Default.Star, null) },
-            onClick = { onToggleFavorite(); showMenu = false }
-        )
-        DropdownMenuItem(
-            text = { Text("삭제", color = MaterialTheme.colorScheme.error) },
-            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-            onClick = { onDelete(); showMenu = false }
-        )
     }
 }
 

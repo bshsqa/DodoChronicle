@@ -26,7 +26,7 @@ fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
 
 @Singleton
 class FaceEmbedder @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private var interpreter: Interpreter? = null
 

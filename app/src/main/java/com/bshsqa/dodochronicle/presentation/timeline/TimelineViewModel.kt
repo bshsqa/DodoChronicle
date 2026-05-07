@@ -55,6 +55,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.bshsqa.dodochronicle.prefs.AppPrefsKeys
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -145,8 +146,9 @@ data class TimelineUiState(
 )
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class TimelineViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
     private val eventRepository: EventRepository,
     private val kakaoRepository: KakaoRepository,

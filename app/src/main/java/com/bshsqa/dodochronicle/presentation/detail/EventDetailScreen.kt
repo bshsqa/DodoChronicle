@@ -8,6 +8,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,7 +44,7 @@ fun EventDetailScreen(
                 title = { Text("이벤트 상세") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "뒤로")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                     }
                 },
                 actions = {
@@ -200,5 +202,5 @@ private fun categoryIconLabel(category: EventCategory) = when (category) {
     EventCategory.SAID -> Icons.Default.RecordVoiceOver to "한 말"
     EventCategory.DID -> Icons.Default.EmojiEvents to "한 일"
     EventCategory.PHOTO -> Icons.Default.PhotoCamera to "사진"
-    EventCategory.OTHER -> Icons.Default.Notes to "기타"
+    EventCategory.OTHER -> Icons.AutoMirrored.Filled.Notes to "기타"
 }

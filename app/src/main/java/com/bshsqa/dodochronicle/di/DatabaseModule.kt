@@ -32,7 +32,7 @@ object DatabaseModule {
                 DodoDatabase.MIGRATION_11_12,
                 DodoDatabase.MIGRATION_12_13
             )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
     @Provides fun provideChildDao(db: DodoDatabase) = db.childDao()

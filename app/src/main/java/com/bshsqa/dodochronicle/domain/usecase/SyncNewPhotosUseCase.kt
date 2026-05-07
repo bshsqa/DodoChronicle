@@ -24,7 +24,7 @@ private const val AUTO_ADD_THRESHOLD = 0.65f
 private const val AUTO_SKIP_THRESHOLD = 0.4f
 
 class SyncNewPhotosUseCase @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val childRepository: ChildRepository,
     private val eventRepository: EventRepository,
     private val faceDetector: FaceDetectorHelper,
