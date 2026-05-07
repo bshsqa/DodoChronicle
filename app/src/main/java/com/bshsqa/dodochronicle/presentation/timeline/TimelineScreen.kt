@@ -774,6 +774,14 @@ private fun CategoryFilterRow(selected: EventCategory?, onSelect: (EventCategory
                 selected = selected == cat,
                 onClick = { onSelect(cat) },
                 label = { Text(labels[cat] ?: "") },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ),
                 leadingIcon = if (selected == cat) ({
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 }) else null
@@ -2310,12 +2318,9 @@ private fun SettingsMenuDialog(
                     )
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onKakaoImport,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2323,12 +2328,9 @@ private fun SettingsMenuDialog(
                 }
                 HorizontalDivider()
                 if (pendingRetryCount > 0) {
-                    TextButton(
+                    SettingsActionButton(
                         onClick = onRetry,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.primary
-                        )
+                        contentColor = MaterialTheme.colorScheme.primary
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -2336,12 +2338,9 @@ private fun SettingsMenuDialog(
                     }
                     HorizontalDivider()
                 }
-                TextButton(
+                SettingsActionButton(
                     onClick = onGeminiSettings,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2355,25 +2354,19 @@ private fun SettingsMenuDialog(
                     )
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onContextUpdate,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("문맥 업데이트", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onScan,
                     enabled = !isScanRunning,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2383,13 +2376,10 @@ private fun SettingsMenuDialog(
                     )
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onCheckMissingPhotos,
                     enabled = !isScanRunning && !isMissingPhotoCheckRunning,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.BrokenImage, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2397,12 +2387,9 @@ private fun SettingsMenuDialog(
                 }
                 HorizontalDivider()
                 if (pendingPhotoCount > 0) {
-                    TextButton(
+                    SettingsActionButton(
                         onClick = onPendingPhotos,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.primary
-                        )
+                        contentColor = MaterialTheme.colorScheme.primary
                     ) {
                         Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -2410,48 +2397,36 @@ private fun SettingsMenuDialog(
                     }
                     HorizontalDivider()
                 }
-                TextButton(
+                SettingsActionButton(
                     onClick = onExportEvents,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("이벤트 내보내기", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onImportEvents,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("이벤트 가져오기", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onHiddenItems,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    contentColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("숨김 아이템", modifier = Modifier.weight(1f))
                 }
                 HorizontalDivider()
-                TextButton(
+                SettingsActionButton(
                     onClick = onReset,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2464,6 +2439,31 @@ private fun SettingsMenuDialog(
             TextButton(onClick = onDismiss) { Text("취소") }
         }
     )
+}
+
+@Composable
+private fun SettingsActionButton(
+    onClick: () -> Unit,
+    contentColor: Color,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        interactionSource = interactionSource,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (pressed) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else Color.Transparent,
+                RoundedCornerShape(8.dp)
+            ),
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor)
+    ) {
+        content()
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
