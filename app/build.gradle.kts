@@ -1,16 +1,9 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.serialization)
-}
-
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) load(f.inputStream())
 }
 
 android {
@@ -36,7 +29,7 @@ android {
         debug {
             isDebuggable = true
             buildConfigField("int", "PHOTO_SCAN_LIMIT", "-1")
-            buildConfigField("String", "GEMINI_API_KEY", "\"${localProps["GEMINI_API_KEY"] ?: ""}\"")
+            buildConfigField("String", "GEMINI_API_KEY", "\"\"")
         }
         release {
             isMinifyEnabled = true
